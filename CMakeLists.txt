@@ -117,7 +117,7 @@ endif()
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
 
 # Boost has no .pc file..
-find_package(Boost 1.71 REQUIRED)
+find_package(Boost 1.71 REQUIRED COMPONENTS program_options)
 add_definitions(-DBOOST_NO_CXX11_SCOPED_ENUMS)
 add_definitions(-DBOOST_ALLOW_DEPRECATED_HEADERS)
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
@@ -131,6 +131,8 @@ set(rapidjson_include_dir ${VALHALLA_SOURCE_DIR}/third_party/rapidjson/include)
 set(robinhoodhashing_include_dir ${VALHALLA_SOURCE_DIR}/third_party/robin-hood-hashing/src/include)
 set(cxxopts_include_dir ${VALHALLA_SOURCE_DIR}/third_party/cxxopts/include)
 set(dirent_include_dir ${VALHALLA_SOURCE_DIR}/third_party/dirent/include)
+set(microtar_include_dir ${VALHALLA_SOURCE_DIR}/third_party/microtar/src)
+
 if (PREFER_EXTERNAL_DEPS)
   # date
   find_package(date QUIET)
@@ -265,7 +267,8 @@ set(valhalla_programs valhalla_run_map_match valhalla_benchmark_loki valhalla_be
 set(valhalla_data_tools valhalla_build_statistics valhalla_ways_to_edges valhalla_validate_transit
   valhalla_benchmark_admins valhalla_build_connectivity	valhalla_build_tiles valhalla_build_admins
   valhalla_convert_transit valhalla_ingest_transit valhalla_query_transit valhalla_add_predicted_traffic
-  valhalla_assign_speeds valhalla_add_elevation valhalla_build_landmarks valhalla_add_landmarks)
+  valhalla_assign_speeds valhalla_add_elevation valhalla_build_landmarks valhalla_add_landmarks
+  valhalla_traffic_utils)
 
 ## Valhalla services
 set(valhalla_services valhalla_loki_worker valhalla_odin_worker valhalla_thor_worker)
@@ -304,6 +307,9 @@ if(ENABLE_DATA_TOOLS)
     PUBLIC
       ${VALHALLA_SOURCE_DIR}/src/mjolnir/statistics.cc
       ${VALHALLA_SOURCE_DIR}/src/mjolnir/statistics_database.cc)
+  # Additional target-specific dependencies
+  target_include_directories(valhalla_traffic_utils PRIVATE ${microtar_include_dir})
+  target_sources(valhalla_traffic_utils PRIVATE ${VALHALLA_SOURCE_DIR}/third_party/microtar/src/microtar.c)
 endif()
 
 if(ENABLE_SERVICES)
