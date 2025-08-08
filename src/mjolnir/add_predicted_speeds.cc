@@ -194,13 +194,6 @@ void UpdateTile(const std::string& tile_dir,
   uint32_t tz_index =
       (tz_polys.size() == 1) ? tz_polys.begin()->first : GetMultiPolyId(tz_polys, base_ll);
 
-  LOG_INFO("tz_index: " + std::to_string(tz_index));
-
-  // for (auto& node : timezone_traffic_tile.nodes()) {
-  //   node.set_timezone(tz_index);
-  // }
-  // timezone_traffic_tile.StoreTileData(); // Write nodes to disk
-
   // Get the tile
   vj::GraphTileBuilder tile_builder(tile_dir, tile_id, false);
 
