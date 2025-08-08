@@ -3,6 +3,9 @@
 #include "baldr/graphreader.h"
 #include "baldr/predictedspeeds.h"
 #include "mjolnir/graphtilebuilder.h"
+#include "mjolnir/admin.h"
+#include "baldr/tilehierarchy.h"
+
 
 #include <boost/tokenizer.hpp>
 
@@ -163,15 +166,62 @@ ParseTrafficFile(const std::vector<std::string>& filenames, TrafficStats& stat) 
 void UpdateTile(const std::string& tile_dir,
                 const GraphId& tile_id,
                 const std::unordered_map<uint32_t, TrafficSpeeds>& speeds,
-                TrafficStats& stat) {
+                TrafficStats& stat,
+                std::optional<AdminDB>& tz_db
+              ) {
   auto tile_path = tile_dir + filesystem::path::preferred_separator + GraphTile::FileSuffix(tile_id);
   if (!filesystem::exists(tile_path)) {
     LOG_ERROR("No tile at " + tile_path);
     return;
   }
 
+  LOG_INFO("BOON");
+
   // Get the tile
   vj::GraphTileBuilder tile_builder(tile_dir, tile_id, false);
+
+  // Try to update the timezone
+  auto base_ll = tile_builder.header()->base_ll();
+
+  LOG_INFO("BOON1");
+
+
+  std::multimap<uint32_t, Geometry> tz_polys;
+  const auto& tiling = TileHierarchy::levels().back().tiles;
+  uint32_t id = tile_id.tileid();
+
+  LOG_INFO("BOON2");
+
+
+  if (tz_db) {
+    LOG_INFO("BOON2.1");
+    tz_polys = GetTimeZones(*tz_db, tiling.TileBounds(id));
+  }
+
+  LOG_INFO("BOON3");
+
+
+  uint32_t tz_index =
+      (tz_polys.size() == 1) ? tz_polys.begin()->first : GetMultiPolyId(tz_polys, base_ll);
+
+      LOG_INFO("BOON5");
+      LOG_INFO(std::to_string(tz_index));
+
+  LOG_INFO("BOON6");
+  tile_builder.nodes();
+  LOG_INFO("BOON7");
+  tile_builder.nodes().back();
+  LOG_INFO("BOON8");
+  LOG_INFO(std::to_string(tile_builder.nodes().size()));
+  // tile_builder.nodes().back().set_timezone(tz_index);
+
+  for (auto& node : tile_builder.nodes()) {
+    node.set_timezone(tz_index);
+  }
+
+
+  LOG_INFO("BOON4");
+
 
   // Get a count of how many predicted speed edges there will be this avoids reallocs
   size_t pred_count = 0;
@@ -217,7 +267,21 @@ void UpdateTile(const std::string& tile_dir,
 void UpdateTiles(const std::string& tile_dir,
                  std::vector<std::pair<GraphId, std::vector<std::string>>>::const_iterator tile_start,
                  std::vector<std::pair<GraphId, std::vector<std::string>>>::const_iterator tile_end,
-                 std::promise<TrafficStats>& result) {
+                 std::promise<TrafficStats>& result,
+                const boost::property_tree::ptree& config) {
+
+
+  // Add timezone during historic traffic tile creation. Normally this would be on tile creation but we get our tiles from Interline
+  auto database = config.get_optional<std::string>("mjolnir.timezone");
+  // Initialize the tz DB (if it exists)
+  auto tz_db = database ? AdminDB::open(*database) : std::optional<AdminDB>{};
+  if (!database) {
+    LOG_WARN("Time zone db not found.  Not saving time zone information.");
+  } else if (!tz_db) {
+    LOG_WARN("Time zone db " + *database + " not found.  Not saving time zone information.");
+  }
+
+
 
   std::stringstream thread_name;
   thread_name << std::this_thread::get_id();
@@ -230,7 +294,7 @@ void UpdateTiles(const std::string& tile_dir,
     LOG_INFO(thread_name.str() + " parsing traffic data for " + std::to_string(tile_start->first));
     auto traffic = ParseTrafficFile(tile_start->second, stat);
     LOG_INFO(thread_name.str() + " add traffic data to " + std::to_string(tile_start->first));
-    UpdateTile(tile_dir, tile_start->first, traffic, stat);
+    UpdateTile(tile_dir, tile_start->first, traffic, stat, tz_db);
     LOG_INFO(thread_name.str() + " finished " + std::to_string(tile_start->first) + "(" +
              std::to_string(++count / total * 100.0) + ")");
   }
@@ -376,7 +440,7 @@ void ProcessTrafficTiles(const std::string& tile_dir,
     tile_end += (i < at_ceiling ? floor + 1 : floor);
     results.emplace_back();
     threads[i] = std::make_shared<std::thread>(UpdateTiles, tile_dir, tile_start, tile_end,
-                                               std::ref(results.back()));
+                                               std::ref(results.back()), config);
   }
 
   // Wait for threads to complete

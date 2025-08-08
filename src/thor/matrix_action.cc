@@ -139,6 +139,7 @@ std::string thor_worker_t::matrix(Api& request) {
     // NOTE: we only look for unfound connections in a second pass; but
     // if A -> B wasn't found and B -> A was, we still expand both for bidirectional efficiency
     // TODO(nils): probably add filtered edges here too?
+    LOG_INFO("Matrix second pass");
     algo->Clear();
     cost->set_pass(1);
     cost->RelaxHierarchyLimits(true);
