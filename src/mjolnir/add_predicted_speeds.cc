@@ -175,53 +175,34 @@ void UpdateTile(const std::string& tile_dir,
     return;
   }
 
-  LOG_INFO("BOON");
 
-  // Get the tile
-  vj::GraphTileBuilder tile_builder(tile_dir, tile_id, false);
+
+  vj::GraphTileBuilder timezone_traffic_tile(tile_dir, tile_id, true);
 
   // Try to update the timezone
-  auto base_ll = tile_builder.header()->base_ll();
-
-  LOG_INFO("BOON1");
+  auto base_ll = timezone_traffic_tile.header()->base_ll();
 
 
   std::multimap<uint32_t, Geometry> tz_polys;
   const auto& tiling = TileHierarchy::levels().back().tiles;
   uint32_t id = tile_id.tileid();
 
-  LOG_INFO("BOON2");
-
-
   if (tz_db) {
-    LOG_INFO("BOON2.1");
     tz_polys = GetTimeZones(*tz_db, tiling.TileBounds(id));
   }
-
-  LOG_INFO("BOON3");
-
 
   uint32_t tz_index =
       (tz_polys.size() == 1) ? tz_polys.begin()->first : GetMultiPolyId(tz_polys, base_ll);
 
-      LOG_INFO("BOON5");
-      LOG_INFO(std::to_string(tz_index));
+  LOG_INFO("tz_index: " + std::to_string(tz_index));
 
-  LOG_INFO("BOON6");
-  tile_builder.nodes();
-  LOG_INFO("BOON7");
-  tile_builder.nodes().back();
-  LOG_INFO("BOON8");
-  LOG_INFO(std::to_string(tile_builder.nodes().size()));
-  // tile_builder.nodes().back().set_timezone(tz_index);
+  // for (auto& node : timezone_traffic_tile.nodes()) {
+  //   node.set_timezone(tz_index);
+  // }
+  // timezone_traffic_tile.StoreTileData(); // Write nodes to disk
 
-  for (auto& node : tile_builder.nodes()) {
-    node.set_timezone(tz_index);
-  }
-
-
-  LOG_INFO("BOON4");
-
+  // Get the tile
+  vj::GraphTileBuilder tile_builder(tile_dir, tile_id, false);
 
   // Get a count of how many predicted speed edges there will be this avoids reallocs
   size_t pred_count = 0;
@@ -243,8 +224,10 @@ void UpdateTile(const std::string& tile_dir,
         directededge.set_constrained_flow_speed(speed.constrained_flow_speed);
       }
       if (speed.free_flow_speed) {
-        directededge.set_free_flow_speed(speed.free_flow_speed);
+        // directededge.set_free_flow_speed(speed.free_flow_speed);
       }
+      directededge.set_free_flow_speed(20);
+
       if (speed.coefficients) {
         tile_builder.AddPredictedSpeed(j, *speed.coefficients, pred_count);
         directededge.set_has_predicted_speed(true);
@@ -257,7 +240,7 @@ void UpdateTile(const std::string& tile_dir,
   }
 
   // Write the new tile with updated directed edges and the predicted speeds
-  tile_builder.UpdatePredictedSpeeds(directededges);
+  tile_builder.UpdatePredictedSpeeds(directededges, tz_index);
 }
 /**
  * Read both the constrained and freeflow speed CSV files
