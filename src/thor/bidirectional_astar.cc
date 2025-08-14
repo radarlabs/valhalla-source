@@ -398,41 +398,28 @@ void BidirectionalAStar::Expand(baldr::GraphReader& graphreader,
   // Keep track of superseded edges
   uint32_t shortcuts = 0;
 
-          // MODIFIED: Calculate time-aware seconds_from_now for bidirectional A*
+              // MODIFIED: Calculate time-aware seconds_from_now for bidirectional A*
   constexpr bool FORWARD = expansion_direction == ExpansionType::forward;
   float seconds_offset = 0.f;
 
-  if (!invariant) {
-    if (FORWARD) {
-      // Forward search: Use actual cumulative travel time
-      seconds_offset = pred.cost().secs;
-    } else {
-      // Reverse search: Estimate total route time and work backwards
-      // This is similar to arrive_by logic - estimate total time and subtract elapsed time
-
-      // Use the pre-calculated total estimated time for reverse search
-      // This was calculated once in GetBestPath and stored in reverse_total_time_
-      float reverse_total_estimated_time = reverse_total_time_;
-
-      // For reverse search: work backwards from total estimated time
-      // Subtract the cumulative travel time so far from the total estimated time
-      seconds_offset = reverse_total_estimated_time - pred.cost().secs;
-
-      // Ensure non-negative time
-      seconds_offset = std::max(0.0f, seconds_offset);
-    }
+  if (FORWARD) {
+    // Forward search: Always use cumulative travel time
+    // The TimeInfo object handles the base time (current time or user's datetime)
+    seconds_offset = pred.cost().secs;
   } else {
-    // When invariant = true, we have a specific datetime provided
-    // We still want time-aware routing, but we need to respect the user's datetime
-    if (FORWARD) {
-      // Forward search: Use actual cumulative travel time from the provided datetime
-      seconds_offset = pred.cost().secs;
-    } else {
-      // Reverse search: Estimate total route time and work backwards from the provided datetime
-      float reverse_total_estimated_time = reverse_total_time_;
-      seconds_offset = reverse_total_estimated_time - pred.cost().secs;
-      seconds_offset = std::max(0.0f, seconds_offset);
-    }
+    // Reverse search: Estimate total route time and work backwards
+    // This is similar to arrive_by logic - estimate total time and subtract elapsed time
+
+    // Use the pre-calculated total estimated time for reverse search
+    // This was calculated once in GetBestPath and stored in reverse_total_time_
+    float reverse_total_estimated_time = reverse_total_time_;
+
+    // For reverse search: work backwards from total estimated time
+    // Subtract the cumulative travel time so far from the total estimated time
+    seconds_offset = reverse_total_estimated_time - pred.cost().secs;
+
+    // Ensure non-negative time
+    seconds_offset = std::max(0.0f, seconds_offset);
   }
 
   // Create time-aware TimeInfo
