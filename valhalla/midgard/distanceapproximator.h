@@ -63,6 +63,8 @@ public:
     return m_lng_scale_;
   }
 
+
+
   /**
    * Approximates the arc distance between the supplied position and the
    * current test point.  It uses the pythagorean theorem with meters

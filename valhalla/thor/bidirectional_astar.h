@@ -130,6 +130,11 @@ protected:
   // edge)
   bool pruning_disabled_at_origin_, pruning_disabled_at_destination_;
 
+  // Total estimated time for reverse search (calculated once per route request)
+  float reverse_total_time_;
+
+
+
   /**
    * Initialize the A* heuristic and adjacency lists for both the forward
    * and reverse search.

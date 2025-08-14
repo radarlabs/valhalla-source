@@ -77,6 +77,8 @@ public:
     return dist * costfactor_;
   }
 
+
+
 private:
   midgard::DistanceApproximator<midgard::PointLL> distapprox_; // Distance approximation
   float costfactor_; // Cost factor - ensures the cost estimate
