@@ -133,6 +133,9 @@ protected:
   // Total estimated time for reverse search (calculated once per route request)
   float reverse_total_time_;
 
+  // Date time type for handling all time scenarios (no time, current, depart_at, arrive_by)
+  Options::DateTimeType date_time_type_;
+
 
 
   /**
