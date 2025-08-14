@@ -64,7 +64,7 @@ BidirectionalAStar::BidirectionalAStar(const boost::property_tree::ptree& config
   pruning_disabled_at_origin_ = false;
   pruning_disabled_at_destination_ = false;
   ignore_hierarchy_limits_ = false;
-  reverse_total_time_ = 0.0f;
+  total_estimated_time_ = 0.0f;
   date_time_type_ = Options::no_time;
 }
 
@@ -99,7 +99,7 @@ void BidirectionalAStar::Clear() {
   pruning_disabled_at_origin_ = false;
   pruning_disabled_at_destination_ = false;
   ignore_hierarchy_limits_ = false;
-  reverse_total_time_ = 0.0f;
+  total_estimated_time_ = 0.0f;
   date_time_type_ = Options::no_time;
 }
 
@@ -410,7 +410,7 @@ void BidirectionalAStar::Expand(baldr::GraphReader& graphreader,
     if (FORWARD) {
       // Forward search: Estimate departure time and add cumulative travel time
       // departure_time = arrival_time - estimated_total_time
-      float estimated_departure_time = reverse_total_time_;
+      float estimated_departure_time = total_estimated_time_;
       seconds_offset = estimated_departure_time + pred.cost().secs;
     } else {
       // Reverse search: Work backwards from arrival time
@@ -428,8 +428,8 @@ void BidirectionalAStar::Expand(baldr::GraphReader& graphreader,
       // This is similar to arrive_by logic - estimate total time and subtract elapsed time
 
       // Use the pre-calculated total estimated time for reverse search
-      // This was calculated once in GetBestPath and stored in reverse_total_time_
-      float reverse_total_estimated_time = reverse_total_time_;
+      // This was calculated once in GetBestPath and stored in total_estimated_time_
+      float reverse_total_estimated_time = total_estimated_time_;
 
       // For reverse search: work backwards from total estimated time
       // Subtract the cumulative travel time so far from the total estimated time
@@ -563,8 +563,8 @@ BidirectionalAStar::GetBestPath(valhalla::Location& origin,
 
   Init(origin_new, destination_new);
 
-  // Calculate total estimated time for reverse search (once per route request)
-  // This is needed for both invariant and non-invariant routes for time-aware routing
+  // Calculate total estimated time for the entire route (once per route request)
+  // This is needed for both forward and reverse searches in time-aware routing
   // Get origin and destination coordinates
   PointLL origin_ll = origin_new;
   PointLL dest_ll = destination_new;
@@ -576,8 +576,8 @@ BidirectionalAStar::GetBestPath(valhalla::Location& origin,
   const float AVERAGE_SPEED_KMH = 100.0f;
   const float AVERAGE_SPEED_MS = AVERAGE_SPEED_KMH * 1000.0f / 3600.0f; // m/s
 
-  reverse_total_time_ = total_distance / AVERAGE_SPEED_MS;
-  reverse_total_time_ = std::max(0.0f, reverse_total_time_);
+  total_estimated_time_ = total_distance / AVERAGE_SPEED_MS;
+  total_estimated_time_ = std::max(0.0f, total_estimated_time_);
 
   // Store date time type for handling all time scenarios
   date_time_type_ = options.date_time_type();

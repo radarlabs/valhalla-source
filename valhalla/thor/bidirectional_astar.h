@@ -130,8 +130,9 @@ protected:
   // edge)
   bool pruning_disabled_at_origin_, pruning_disabled_at_destination_;
 
-  // Total estimated time for reverse search (calculated once per route request)
-  float reverse_total_time_;
+  // Total estimated time for the entire route (calculated once per route request)
+  // Used for both forward and reverse searches in time-aware routing
+  float total_estimated_time_;
 
   // Date time type for handling all time scenarios (no time, current, depart_at, arrive_by)
   Options::DateTimeType date_time_type_;
