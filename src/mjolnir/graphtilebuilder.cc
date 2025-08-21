@@ -1280,6 +1280,12 @@ void GraphTileBuilder::UpdatePredictedSpeeds(const std::vector<DirectedEdge>& di
   }
 }
 
+void GraphTileBuilder::UpdatePredictedSpeeds(const std::vector<DirectedEdge>& directededges) {
+  // Call the two-parameter version with an empty modified_nodes vector
+  std::vector<NodeInfo> empty_modified_nodes;
+  UpdatePredictedSpeeds(directededges, empty_modified_nodes);
+}
+
 void GraphTileBuilder::AddLandmark(const GraphId& edge_id, const Landmark& landmark) {
   // check the edge id makes sense
   if (header_builder_.graphid().Tile_Base() != edge_id.Tile_Base()) {

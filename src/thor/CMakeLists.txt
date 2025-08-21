@@ -13,6 +13,7 @@ set(sources
   timedistancematrix.cc
   triplegbuilder.cc
   unidirectional_astar.cc
+  # vehicle_routing.cc
   worker.cc)
 
 set(sources_with_warnings

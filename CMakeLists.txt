@@ -230,6 +230,47 @@ if(ENABLE_DATA_TOOLS)
   pkg_check_modules(GEOS REQUIRED IMPORTED_TARGET geos)
 endif()
 
+# OR-Tools for VRP functionality
+# find_package(ortools QUIET)
+# if(ortools_FOUND)
+#   message(STATUS "OR-Tools found: ${ortools_VERSION}")
+#   set(ENABLE_ORTOOLS ON)
+# else()
+#   message(WARNING "OR-Tools not found, VRP features will be disabled")
+#   set(ENABLE_ORTOOLS OFF)
+# endif()
+
+# OR-Tools for VRP functionality
+option(ENABLE_ORTOOLS "Enable OR-Tools for VRP functionality" ON)
+
+if(ENABLE_ORTOOLS)
+  include(FetchContent)
+
+  FetchContent_Declare(
+    or-tools
+    GIT_REPOSITORY https://github.com/google/or-tools.git
+    GIT_TAG v9.14
+  )
+
+  # Configure OR-Tools to use Valhalla's protobuf
+  set(BUILD_DEPS OFF CACHE BOOL "Build OR-Tools dependencies" FORCE)
+  set(BUILD_SAMPLES OFF CACHE BOOL "Build OR-Tools samples" FORCE)
+  set(BUILD_TESTING OFF CACHE BOOL "Build OR-Tools tests" FORCE)
+  set(BUILD_PYTHON OFF CACHE BOOL "Build OR-Tools Python bindings" FORCE)
+  set(BUILD_JAVA OFF CACHE BOOL "Build OR-Tools Java bindings" FORCE)
+  set(BUILD_DOTNET OFF CACHE BOOL "Build OR-Tools .NET bindings" FORCE)
+  set(BUILD_EXAMPLES OFF CACHE BOOL "Build OR-Tools examples" FORCE)
+
+  FetchContent_MakeAvailable(or-tools)
+
+  set(ortools_TARGET ortools::ortools)
+  set(ENABLE_ORTOOLS ON)
+  message(STATUS "OR-Tools fetched and built successfully")
+else()
+  set(ENABLE_ORTOOLS OFF)
+  message(STATUS "OR-Tools disabled by user")
+endif()
+
 if (ENABLE_THREAD_SAFE_TILE_REF_COUNT)
  add_definitions(-DENABLE_THREAD_SAFE_TILE_REF_COUNT)
 endif ()
