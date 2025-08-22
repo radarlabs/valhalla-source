@@ -13,7 +13,7 @@ set(sources
   timedistancematrix.cc
   triplegbuilder.cc
   unidirectional_astar.cc
-  # vehicle_routing.cc
+  vehicle_routing.cc
   worker.cc)
 
 set(sources_with_warnings
@@ -30,8 +30,10 @@ set(sources_with_warnings
   trace_route_action.cc
   triplegbuilder_utils.h)
 
+# Add OR-Tools include directory explicitly
 set(system_includes
   ${date_include_dir}
+  "/Users/boon.boonsiri/local/or-tools_arm64_macOS-15.3.1_cpp_v9.12.4544/include"
   $<$<BOOL:${WIN32}>:${dirent_include_dir}>)
 
 valhalla_module(NAME thor
@@ -50,11 +52,14 @@ valhalla_module(NAME thor
     PRIVATE
       ${rapidjson_include_dir}
       ${unordered_dense_include_dir}
-
+  LINK_LIBRARIES
+    PUBLIC
+      ortools::ortools
   DEPENDS
     valhalla::proto
     valhalla::sif
     valhalla::meili
     ${valhalla_protobuf_targets}
     Boost::boost
-    ${libprime_server_targets})
+    ${libprime_server_targets}
+    )

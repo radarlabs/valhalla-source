@@ -115,6 +115,8 @@ set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
 
 # Boost has no .pc file..
 find_package(Boost 1.71 REQUIRED)
+
+
 add_definitions(-DBOOST_NO_CXX11_SCOPED_ENUMS)
 add_definitions(-DBOOST_ALLOW_DEPRECATED_HEADERS)
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
@@ -230,50 +232,16 @@ if(ENABLE_DATA_TOOLS)
   pkg_check_modules(GEOS REQUIRED IMPORTED_TARGET geos)
 endif()
 
-# OR-Tools for VRP functionality
-# find_package(ortools QUIET)
-# if(ortools_FOUND)
-#   message(STATUS "OR-Tools found: ${ortools_VERSION}")
-#   set(ENABLE_ORTOOLS ON)
-# else()
-#   message(WARNING "OR-Tools not found, VRP features will be disabled")
-#   set(ENABLE_ORTOOLS OFF)
-# endif()
-
-# OR-Tools for VRP functionality
-option(ENABLE_ORTOOLS "Enable OR-Tools for VRP functionality" ON)
-
-if(ENABLE_ORTOOLS)
-  include(FetchContent)
-
-  FetchContent_Declare(
-    or-tools
-    GIT_REPOSITORY https://github.com/google/or-tools.git
-    GIT_TAG v9.14
-  )
-
-  # Configure OR-Tools to use Valhalla's protobuf
-  set(BUILD_DEPS OFF CACHE BOOL "Build OR-Tools dependencies" FORCE)
-  set(BUILD_SAMPLES OFF CACHE BOOL "Build OR-Tools samples" FORCE)
-  set(BUILD_TESTING OFF CACHE BOOL "Build OR-Tools tests" FORCE)
-  set(BUILD_PYTHON OFF CACHE BOOL "Build OR-Tools Python bindings" FORCE)
-  set(BUILD_JAVA OFF CACHE BOOL "Build OR-Tools Java bindings" FORCE)
-  set(BUILD_DOTNET OFF CACHE BOOL "Build OR-Tools .NET bindings" FORCE)
-  set(BUILD_EXAMPLES OFF CACHE BOOL "Build OR-Tools examples" FORCE)
-
-  FetchContent_MakeAvailable(or-tools)
-
-  set(ortools_TARGET ortools::ortools)
-  set(ENABLE_ORTOOLS ON)
-  message(STATUS "OR-Tools fetched and built successfully")
-else()
-  set(ENABLE_ORTOOLS OFF)
-  message(STATUS "OR-Tools disabled by user")
-endif()
-
 if (ENABLE_THREAD_SAFE_TILE_REF_COUNT)
  add_definitions(-DENABLE_THREAD_SAFE_TILE_REF_COUNT)
 endif ()
+
+## OR-Tools configuration - must be before add_subdirectory(src)
+list(APPEND CMAKE_PREFIX_PATH "/Users/boon.boonsiri/local/or-tools_arm64_macOS-15.3.1_cpp_v9.12.4544")
+# Find OR-Tools package using its CMake config
+find_package(ortools REQUIRED CONFIG)
+message(STATUS "OR-Tools found: ${ortools_DIR}")
+set(ENABLE_ORTOOLS ON)
 
 ## libvalhalla
 add_subdirectory(src)
@@ -541,3 +509,14 @@ if(ENABLE_NAPI_BINDINGS)
   )
 
 endif()
+
+
+list(APPEND CMAKE_PREFIX_PATH "/Users/boon.boonsiri/local/or-tools_arm64_macOS-15.3.1_cpp_v9.12.4544")
+# Find OR-Tools package using its CMake config
+find_package(ortools REQUIRED CONFIG)
+message(STATUS "OR-Tools found: ${ortools_DIR}")
+set(ENABLE_ORTOOLS ON)
+
+target_link_libraries(valhalla PRIVATE ortools::ortools)
+
+
