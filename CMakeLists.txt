@@ -122,6 +122,9 @@ add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 
+# Find OpenSSL for vroom library
+find_package(OpenSSL REQUIRED)
+
 # resolve vendored libraries
 set(date_include_dir ${VALHALLA_SOURCE_DIR}/third_party/date/include)
 set(rapidjson_include_dir ${VALHALLA_SOURCE_DIR}/third_party/rapidjson/include)
@@ -203,6 +206,49 @@ if (ENABLE_GDAL AND (ENABLE_SERVICES OR ENABLE_TOOLS OR ENABLE_PYTHON_BINDINGS))
 endif()
 
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG OFF)
+
+# VROOM library configuration
+# Check if libvroom.a exists in the vroom lib directory
+set(VROOM_LIB_PATH "/Users/boon.boonsiri/local/backup/vroom/lib/libvroom.a")
+if(EXISTS ${VROOM_LIB_PATH})
+  message(STATUS "Found libvroom.a at ${VROOM_LIB_PATH}")
+  set(VROOM_LIBRARY ${VROOM_LIB_PATH})
+  set(VROOM_INCLUDE_DIR "/Users/boon.boonsiri/local/backup/vroom/src")
+
+  # Create an imported target for vroom
+  add_library(vroom STATIC IMPORTED)
+  set_target_properties(vroom PROPERTIES
+    IMPORTED_LOCATION ${VROOM_LIBRARY}
+    INTERFACE_INCLUDE_DIRECTORIES ${VROOM_INCLUDE_DIR}
+  )
+
+  # Add required system libraries for vroom
+  target_link_libraries(vroom INTERFACE
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+  )
+
+  # Check for GLPK (similar to the Makefile logic)
+  find_path(GLPK_INCLUDE_DIR glpk.h
+    PATHS /usr/include /usr/local/include
+  )
+  if(GLPK_INCLUDE_DIR)
+    find_library(GLPK_LIBRARY glpk)
+    if(GLPK_LIBRARY)
+      message(STATUS "Found GLPK: ${GLPK_LIBRARY}")
+      target_link_libraries(vroom INTERFACE ${GLPK_LIBRARY})
+      target_include_directories(vroom INTERFACE ${GLPK_INCLUDE_DIR})
+    endif()
+  endif()
+
+  set(VROOM_FOUND TRUE)
+  set(VROOM_FOUND ${VROOM_FOUND} CACHE BOOL "Whether VROOM library was found" FORCE)
+else()
+  message(WARNING "libvroom.a not found at ${VROOM_LIB_PATH}")
+  set(VROOM_FOUND FALSE)
+  set(VROOM_FOUND ${VROOM_FOUND} CACHE BOOL "Whether VROOM library was found" FORCE)
+endif()
 
 # libprime_server
 # see https://gitlab.kitware.com/cmake/cmake/-/issues/19467
@@ -311,6 +357,13 @@ if(ENABLE_SERVICES)
     target_link_libraries(${program} valhalla)
     install(TARGETS ${program} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime)
   endforeach()
+endif()
+
+# VROOM library integration with valhalla
+if(VROOM_FOUND)
+  message(STATUS "VROOM library will be linked to valhalla")
+else()
+  message(WARNING "VROOM library not found - vehicle routing features will not be available")
 endif()
 
 # add the scripts to the build folder as well

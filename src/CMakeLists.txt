@@ -208,7 +208,9 @@ target_link_libraries(valhalla
     $<$<BOOL:${WIN32}>:ws2_32>
   PRIVATE
     $<$<BOOL:${ENABLE_COVERAGE}>:gcov>
-    Threads::Threads)
+    Threads::Threads
+    $<$<BOOL:${VROOM_FOUND}>:vroom>)
+
 
 set_target_properties(valhalla PROPERTIES
   VERSION "${VERSION}"
