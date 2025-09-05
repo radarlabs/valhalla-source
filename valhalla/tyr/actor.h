@@ -213,6 +213,32 @@ public:
                      const std::function<void()>* interrupt = nullptr,
                      Api* api = nullptr);
 
+  /**
+   * Perform the tile action and return MVT (Mapbox Vector Tiles) data. The
+   * request may either be in the form of a json string provided by the request_str parameter or
+   * contained in the api parameter as a deserialized protobuf object
+   * @param request_str  json string if json input is being used empty otherwise
+   * @param interrupt    allows the underlying computation to be aborted via the functor throwing
+   * @param api          protobuffer object which can contain the input request via the options object
+   *                     and will be filled out as the request is processed
+   * @return MVT tile data
+   */
+  std::string tile(const std::string& request_str,
+                   const std::function<void()>* interrupt = nullptr,
+                   Api* api = nullptr);
+
+  /**
+   * Generate MVT tile for specific tile coordinates (z/x/y). This is the proper
+   * way to serve MVT tiles following the standard tile URL pattern.
+   * @param z zoom level
+   * @param x tile x coordinate
+   * @param y tile y coordinate
+   * @param interrupt allows the underlying computation to be aborted via the functor throwing
+   * @return MVT tile data
+   */
+  std::string tile_xyz(uint32_t z, uint32_t x, uint32_t y,
+                       const std::function<void()>* interrupt = nullptr);
+
 protected:
   struct pimpl_t;
   std::shared_ptr<pimpl_t> pimpl;

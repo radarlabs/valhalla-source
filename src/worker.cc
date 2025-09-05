@@ -18,8 +18,10 @@
 #include <cpp-statsd-client/StatsdClient.hpp>
 
 #include <sstream>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
+#include <vector>
 
 using namespace valhalla;
 #ifdef ENABLE_SERVICES
@@ -1489,6 +1491,79 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
 
   // get the action
   Options::Action action = static_cast<Options::Action>(Options::Action_ARRAYSIZE);
+
+  // Simple /foo endpoint that just returns a message
+  if (request.path == "/foo") {
+    action = Options::status;  // Use existing status action
+    api.mutable_options()->set_action(action);
+    api.mutable_options()->set_format(Options::json);
+    return;
+  }
+
+        // Simple /tile endpoint that just returns basic info
+  LOG_INFO("TILE DEBUG: Checking path: " + request.path);
+  LOG_INFO("TILE DEBUG: request.path == \"/tile\": " + std::to_string(request.path == "/tile"));
+  LOG_INFO("TILE DEBUG: request.path.find(\"/tile/\") == 0: " + std::to_string(request.path.find("/tile/") == 0));
+
+  if (request.path == "/tile" || request.path.find("/tile/") == 0) {
+    LOG_INFO("TILE DEBUG: Inside tile handling block");
+    LOG_INFO("TILE DEBUG: Parsed coordinates: request.path=" + request.path);
+
+    // Create a custom response by setting up the API
+    LOG_INFO("TILE DEBUG: Setting action to Options::tile");
+    action = Options::tile;  // Use tile action to trigger MVT generation
+    LOG_INFO("TILE DEBUG: Setting format to Options_Format_mvt");
+    api.mutable_options()->set_action(action);
+    api.mutable_options()->set_format(Options_Format_mvt);  // Set MVT format
+
+    // Parse z/x/y coordinates if they exist
+    std::string tile_id = "tile_endpoint_active";
+    if (request.path.find("/tile/") == 0) {
+      std::string path = request.path.substr(6); // Remove "/tile/"
+      std::vector<std::string> parts;
+      std::stringstream ss(path);
+      std::string part;
+
+      while (std::getline(ss, part, '/')) {
+        parts.push_back(part);
+      }
+
+      if (parts.size() == 3) {
+        // Remove .mvt extension from y coordinate if present
+        std::string y_str = parts[2];
+        if (y_str.length() >= 4 && y_str.substr(y_str.length() - 4) == ".mvt") {
+          y_str = y_str.substr(0, y_str.length() - 4);
+        }
+
+                try {
+          uint32_t z = std::stoul(parts[0]);
+          uint32_t x = std::stoul(parts[1]);
+          uint32_t y = std::stoul(y_str);
+
+          LOG_INFO("TILE DEBUG: Parsed coordinates: z=" + std::to_string(z) + ", x=" + std::to_string(x) + ", y=" + std::to_string(y));
+
+          // Store coordinates in the API for the MVT serializer to use
+          // We'll use the id field to encode z/x/y coordinates
+          tile_id = std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y);
+
+          // Also store the coordinates in custom fields if available
+          // (This is where you could add custom protobuf fields for tile data)
+        } catch (const std::exception& e) {
+          // If parsing fails, just use a generic tile identifier
+          tile_id = "tile_invalid_coordinates";
+        }
+      } else {
+        tile_id = "tile_invalid_format";
+      }
+    }
+
+        // Set the tile ID in the API options (contains z/x/y coordinates)
+    api.mutable_options()->set_id(tile_id);
+
+    // Don't return early - let the request continue through the pipeline
+    // so it reaches the actor_t::act function where MVT serialization happens
+  }
+
   if (!request.path.empty())
     Options_Action_Enum_Parse(request.path.substr(1), &action);
 
@@ -1547,6 +1622,11 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
 
   // parse out the options
   from_json(document, action, api);
+
+  // Ensure the action is set in the api options
+  if (action != static_cast<Options::Action>(Options::Action_ARRAYSIZE)) {
+    api.mutable_options()->set_action(action);
+  }
 }
 
 const headers_t::value_type CORS{"Access-Control-Allow-Origin", "*"};

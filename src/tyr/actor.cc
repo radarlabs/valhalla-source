@@ -4,6 +4,7 @@
 #include "odin/worker.h"
 #include "thor/worker.h"
 #include "tyr/serializers.h"
+#include "tyr/mvt_serializer.h"
 
 using namespace valhalla;
 using namespace valhalla::loki;
@@ -80,6 +81,17 @@ std::string actor_t::act(Api& api, const std::function<void()>* interrupt) {
       return centroid("", interrupt, &api);
     case Options::status:
       return status("", interrupt, &api);
+      case Options::tile:
+        LOG_INFO("ACTOR DEBUG: Handling tile action");
+        LOG_INFO("ACTOR DEBUG: About to call serializeMvt");
+        try {
+          auto response = serializeMvt(api);
+          LOG_INFO("ACTOR DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
+          return response;
+        } catch (const std::exception& e) {
+          LOG_ERROR("ACTOR DEBUG: serializeMvt failed with error: " + std::string(e.what()));
+          throw;
+        }
     default:
       throw valhalla_exception_t{106};
   }
@@ -363,6 +375,108 @@ actor_t::status(const std::string& request_str, const std::function<void()>* int
     cleanup();
   }
   return json;
+}
+
+std::string
+actor_t::tile(const std::string& request_str, const std::function<void()>* interrupt, Api* api) {
+  // set the interrupts
+  pimpl->set_interrupts(interrupt);
+  // if the caller doesn't want a copy we'll use this dummy
+  Api dummy;
+  if (!api) {
+    api = &dummy;
+  }
+  // parse the request
+  ParseApi(request_str, Options::tile, *api);
+
+  // Check if we have tile coordinates in the id field (from HTTP route parsing)
+  if (api->options().has_id()) {
+    std::string tile_id = api->options().id();
+
+    // Parse z/x/y from the id field (format: "z/x/y")
+    std::vector<std::string> parts;
+    std::stringstream ss(tile_id);
+    std::string part;
+    while (std::getline(ss, part, '/')) {
+      parts.push_back(part);
+    }
+
+    if (parts.size() == 3) {
+      try {
+        uint32_t z = std::stoul(parts[0]);
+        uint32_t x = std::stoul(parts[1]);
+        uint32_t y = std::stoul(parts[2]);
+
+        // Use the tile_xyz function for proper tile generation
+        auto mvt_data = tile_xyz(z, x, y, interrupt);
+        return mvt_data;
+
+      } catch (const std::exception& e) {
+        throw valhalla_exception_t{400, "Invalid tile coordinates: " + tile_id};
+      }
+    }
+  }
+
+  // Fallback: Check if we have locations to define the bounding box (for testing)
+  if (api->options().locations_size() >= 2) {
+    // For now, use locations to create a bounding box
+    // But this should be replaced with proper tile coordinate handling
+    auto point1 = api->options().locations(0).ll();
+    auto point2 = api->options().locations(1).ll();
+
+    // Create bounding box with min/max coordinates
+    double min_lat = std::min(point1.lat(), point2.lat());
+    double max_lat = std::max(point1.lat(), point2.lat());
+    double min_lng = std::min(point1.lng(), point2.lng());
+    double max_lng = std::max(point1.lng(), point2.lng());
+
+    auto bbox = midgard::AABB2<midgard::PointLL>(min_lng, min_lat, max_lng, max_lat);
+
+    // Default zoom level
+    uint32_t z = 14;
+
+    // Generate MVT tile
+    auto mvt_data = tyr::MvtSerializer::generateTile(bbox, z, pimpl->reader);
+
+    // if they want you do to do the cleanup automatically
+    if (auto_cleanup) {
+      cleanup();
+    }
+
+    return mvt_data;
+  } else {
+    // Return error if no tile coordinates provided
+    throw valhalla_exception_t{107, "Tile request requires tile coordinates (z/x/y) or bounding box locations"};
+  }
+}
+
+std::string
+actor_t::tile_xyz(uint32_t z, uint32_t x, uint32_t y, const std::function<void()>* interrupt) {
+  // set the interrupts
+  pimpl->set_interrupts(interrupt);
+
+  // Convert tile coordinates (z/x/y) to bounding box
+  // This follows the standard Web Mercator tile calculation
+  double n = std::pow(2.0, z);
+  double west = x / n * 360.0 - 180.0;
+  double east = (x + 1) / n * 360.0 - 180.0;
+  double north = std::atan(std::sinh(M_PI * (1 - 2 * y / n))) * 180.0 / M_PI;
+  double south = std::atan(std::sinh(M_PI * (1 - 2 * (y + 1) / n))) * 180.0 / M_PI;
+
+  // Create bounding box from tile coordinates
+  midgard::PointLL sw(south, west);
+  midgard::PointLL ne(north, east);
+  auto bbox = midgard::AABB2<midgard::PointLL>(west, south, east, north);
+
+  // Generate MVT tile
+  auto mvt_data = tyr::MvtSerializer::generateTile(bbox, z, pimpl->reader);
+
+  // if they want you do to do the cleanup automatically
+  if (auto_cleanup) {
+    cleanup();
+  }
+
+  return mvt_data;
 }
 
 } // namespace tyr

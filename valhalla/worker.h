@@ -127,6 +127,7 @@ using content_type = prime_server::headers_t::value_type;
 const content_type JSON_MIME{"Content-type", "application/json;charset=utf-8"};
 const content_type JS_MIME{"Content-type", "application/javascript;charset=utf-8"};
 const content_type PBF_MIME{"Content-type", "application/x-protobuf"};
+const content_type MVT_MIME{"Content-type", "application/x-protobuf"};
 const content_type GPX_MIME{"Content-type", "application/gpx+xml;charset=utf-8"};
 } // namespace worker
 

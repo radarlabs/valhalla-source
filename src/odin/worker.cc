@@ -73,12 +73,30 @@ odin_worker_t::work(const std::list<zmq::message_t>& job,
       throw valhalla_exception_t{200, "Failed parsing pbf in Odin::Worker"};
     }
 
-    // its either a simple status request or its a route to narrate
+    // its either a simple status request, tile request, or its a route to narrate
     switch (request.options().action()) {
       case Options::status: {
         status(request);
         auto response = tyr::serializeStatus(request);
         result = to_response(response, info, request);
+        break;
+      }
+      case Options::tile: {
+        LOG_INFO("ODIN DEBUG: Processing tile action");
+        // For tile requests, we need to generate the MVT response here
+        // since the Tyr actor is not part of the HTTP worker pipeline
+        try {
+          LOG_INFO("ODIN DEBUG: About to call serializeMvt");
+          auto response = tyr::serializeMvt(request);
+          LOG_INFO("ODIN DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
+
+          // Create the response with MVT content type
+          result = to_response(response, info, request);
+          LOG_INFO("ODIN DEBUG: Response created successfully");
+        } catch (const std::exception& e) {
+          LOG_ERROR("ODIN DEBUG: serializeMvt failed with error: " + std::string(e.what()));
+          throw valhalla_exception_t{400, std::string("MVT generation failed: ") + e.what()};
+        }
         break;
       }
       default: {
