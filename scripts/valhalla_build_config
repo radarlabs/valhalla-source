@@ -73,6 +73,19 @@ config = {
         'logging': {'type': 'std_out', 'color': True, 'file_name': 'path_to_some_file.log'},
     },
     'additional_data': {'elevation': '/data/valhalla/elevation/', 'elevation_url': Optional(str)},
+    'map_tile': {
+        'valhalla_tile_0_min_zoom': 5,
+        'valhalla_tile_1_min_zoom': 14,
+        'valhalla_tile_2_min_zoom': 18,
+        'max_edges_added': 200000,
+        'valhalla_road_class_0_min_zoom': 5,
+        'valhalla_road_class_1_min_zoom': 7,
+        'valhalla_road_class_2_min_zoom': 12,
+        'valhalla_road_class_3_min_zoom': 12,
+        'valhalla_road_class_4_min_zoom': 12,
+        'valhalla_all_road_classes_min_zoom': 12,
+        'add_debug_info_to_tile': False,
+    },
     'loki': {
         'actions': [
             'locate',
@@ -394,6 +407,19 @@ help_text = {
     'additional_data': {
         'elevation': 'Location of elevation tiles',
         'elevation_url': 'Http location to read elevations from. this address is used if elevation tiles were not found in the elevation directory. Ex.: http://<your_valhalla_tile_server_host>:<your_valhalla_tile_server_port>/some/Optional/path/{tilePath}?some=Optional&query=params. Valhalla will look for the {tilePath} portion of the url and fill this out with an elevation path when it makes a request for that particular elevation',
+    },
+    'map_tile': {
+        'valhalla_tile_0_min_zoom': 'Maplibre zoom level in which Valhalla level 0 tiles are used',
+        'valhalla_tile_1_min_zoom': 'Maplibre zoom level in which Valhalla level 1 tiles are used',
+        'valhalla_tile_2_min_zoom': 'Maplibre zoom level in which Valhalla level 2 tiles are used',
+        'max_edges_added': 'Maximum number of edges added to a tile',
+        'valhalla_road_class_0_min_zoom': 'Maplibre zoom level in which Valhalla road class 0 tiles are used',
+        'valhalla_road_class_1_min_zoom': 'Maplibre zoom level in which Valhalla road class 1 tiles are used',
+        'valhalla_road_class_2_min_zoom': 'Maplibre zoom level in which Valhalla road class 2 tiles are used',
+        'valhalla_road_class_3_min_zoom': 'Maplibre zoom level in which Valhalla road class 3 tiles are used',
+        'valhalla_road_class_4_min_zoom': 'Maplibre zoom level in which Valhalla road class 4 tiles are used',
+        'valhalla_all_road_classes_min_zoom': 'Maplibre zoom level in which Valhalla all road classes tiles are used',
+        'add_debug_info_to_tile': 'Whether to add debug information to the tile such as road class, road name',
     },
     'loki': {
         'actions': 'Comma separated list of allowable actions for the service, one or more of: locate, route, height, optimized_route, isochrone, trace_route, trace_attributes, transit_available, expansion, centroid, status',

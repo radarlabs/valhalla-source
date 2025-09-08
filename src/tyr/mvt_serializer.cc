@@ -31,7 +31,8 @@ namespace tyr {
 
 
 std::string MvtSerializer::serialize(const valhalla::Api& api, const valhalla::Options_Format& format,
-                                    const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader) {
+                                    const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader,
+                                    const boost::property_tree::ptree* config) {
   LOG_INFO("MVT DEBUG: serialize called with format: " + std::to_string(format));
 
   // Currently only support MVT format
@@ -80,7 +81,7 @@ std::string MvtSerializer::serialize(const valhalla::Api& api, const valhalla::O
 
           // Generate actual MVT protobuf data
       LOG_INFO("MVT DEBUG: Generating MVT protobuf data");
-      std::string mvt_data = generateMvtProtobuf(z, x, y, bbox, graph_reader);
+      std::string mvt_data = generateMvtProtobuf(z, x, y, bbox, graph_reader, config);
       LOG_INFO("MVT DEBUG: Generated MVT protobuf, size: " + std::to_string(mvt_data.size()));
       return mvt_data;
 
@@ -280,7 +281,8 @@ valhalla::midgard::AABB2<valhalla::midgard::PointLL> MvtSerializer::calculateTil
 
 std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t y,
                                                const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
-                                               const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader) {
+                                               const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader,
+                                               const boost::property_tree::ptree* config) {
   LOG_INFO("MVT DEBUG: Generating MVT protobuf data for zoom " + std::to_string(z));
 
     LOG_INFO("MVT DEBUG: Processing MVT tile " + std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y));
@@ -421,6 +423,29 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           LOG_INFO("MVT DEBUG: Successfully created GraphReader");
         }
 
+        // Determine which Valhalla tile levels to include based on zoom level
+        std::vector<uint8_t> allowed_tile_levels;
+        if (config) {
+          // Use configuration-based filtering
+          uint32_t tile_0_min_zoom = config->get("map_tile.valhalla_tile_0_min_zoom", 5);
+          uint32_t tile_1_min_zoom = config->get("map_tile.valhalla_tile_1_min_zoom", 14);
+          uint32_t tile_2_min_zoom = config->get("map_tile.valhalla_tile_2_min_zoom", 16);
+
+          if (z >= tile_0_min_zoom) allowed_tile_levels.push_back(0);
+          if (z >= tile_1_min_zoom) allowed_tile_levels.push_back(1);
+          if (z >= tile_2_min_zoom) allowed_tile_levels.push_back(2);
+        } else {
+          // Fallback to hardcoded values
+          if (z >= 5) allowed_tile_levels.push_back(0);
+          if (z >= 14) allowed_tile_levels.push_back(1);
+          if (z >= 16) allowed_tile_levels.push_back(2);
+        }
+
+        LOG_INFO("MVT DEBUG: Zoom " + std::to_string(z) + " allows tile levels: ");
+        for (auto level : allowed_tile_levels) {
+          LOG_INFO("MVT DEBUG:   - Level " + std::to_string(level));
+        }
+
         // Use efficient spatial binning to get only edges that intersect with our bounding box
         LOG_INFO("MVT DEBUG: Using efficient edges_in_bbox to find relevant edges");
         auto edge_ids = loki::edges_in_bbox(bbox, *reader);
@@ -432,6 +457,18 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
 
         // Process only the edges that intersect with our bounding box
         for (const auto& edge_id : edge_ids) {
+          // Filter by tile level first (most efficient)
+          bool tile_level_allowed = false;
+          for (auto allowed_level : allowed_tile_levels) {
+            if (edge_id.level() == allowed_level) {
+              tile_level_allowed = true;
+              break;
+            }
+          }
+          if (!tile_level_allowed) {
+            continue; // Skip edges from disallowed tile levels
+          }
+
           // Get the tile for this edge
           auto tile = reader->GetGraphTile(edge_id);
           if (!tile) continue;
@@ -478,19 +515,51 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             continue;
           }
 
-          // For zoom levels < 12, only show class 0 (motorway) and class 1 (trunk) roads
-          if (z < 12) {
-            auto road_class = static_cast<int>(edge->classification());
-            if (road_class != 0 && road_class != 1) {
-              continue; // Skip this road
-            }
-          }
+          // Filter by road class based on zoom level
+          auto road_class = static_cast<int>(edge->classification());
+          bool road_class_allowed = false;
 
-          if (z < 7) {
-            auto road_class = static_cast<int>(edge->classification());
-            if (road_class != 0) {
-              continue; // Skip this road
+          if (config) {
+          // Use configuration-based road class filtering
+          uint32_t class_0_min_zoom = config->get("map_tile.valhalla_road_class_0_min_zoom", 5);
+          uint32_t class_1_min_zoom = config->get("map_tile.valhalla_road_class_1_min_zoom", 7);
+          uint32_t class_2_min_zoom = config->get("map_tile.valhalla_road_class_2_min_zoom", 12);
+          uint32_t class_3_min_zoom = config->get("map_tile.valhalla_road_class_3_min_zoom", 12);
+          uint32_t class_4_min_zoom = config->get("map_tile.valhalla_road_class_4_min_zoom", 12);
+          uint32_t all_classes_min_zoom = config->get("map_tile.valhalla_all_road_classes_min_zoom", 12);
+
+            if (z >= all_classes_min_zoom) {
+              road_class_allowed = true; // All road classes allowed
+            } else if (road_class == 0 && z >= class_0_min_zoom) {
+              road_class_allowed = true; // Motorway
+            } else if (road_class == 1 && z >= class_1_min_zoom) {
+              road_class_allowed = true; // Trunk
+            } else if (road_class == 2 && z >= class_2_min_zoom) {
+              road_class_allowed = true; // Primary
+            } else if (road_class == 3 && z >= class_3_min_zoom) {
+              road_class_allowed = true; // Secondary
+            } else if (road_class == 4 && z >= class_4_min_zoom) {
+              road_class_allowed = true; // Tertiary
             }
+        } else {
+          // Fallback to hardcoded values (matching the default configuration)
+          if (z >= 12) {
+            road_class_allowed = true; // All road classes at zoom 12+
+          } else if (road_class == 0 && z >= 5) {
+            road_class_allowed = true; // Motorway at zoom 5+
+          } else if (road_class == 1 && z >= 7) {
+            road_class_allowed = true; // Trunk at zoom 7+
+          } else if (road_class == 2 && z >= 12) {
+            road_class_allowed = true; // Primary at zoom 12+
+          } else if (road_class == 3 && z >= 12) {
+            road_class_allowed = true; // Secondary at zoom 12+
+          } else if (road_class == 4 && z >= 12) {
+            road_class_allowed = true; // Tertiary at zoom 12+
+          }
+        }
+
+          if (!road_class_allowed) {
+            continue; // Skip this road class at this zoom level
           }
 
           // Create individual MVT feature for this road (no merging for now)

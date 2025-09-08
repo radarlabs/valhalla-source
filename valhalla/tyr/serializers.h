@@ -105,7 +105,7 @@ std::string serializeTraceAttributes(
  * @param request  the proto request with routing data
  * @return MVT data as a string
  */
-std::string serializeMvt(Api& request, const std::shared_ptr<baldr::GraphReader>& reader);
+std::string serializeMvt(Api& request, const std::shared_ptr<baldr::GraphReader>& reader, const boost::property_tree::ptree* config = nullptr);
 
 /**
  * Turns the pbf into a status response

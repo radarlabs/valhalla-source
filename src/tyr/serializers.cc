@@ -285,9 +285,9 @@ void geojson_shape(const std::vector<midgard::PointLL>& shape, rapidjson::writer
   writer.end_array();
 }
 
-std::string serializeMvt(Api& request, const std::shared_ptr<baldr::GraphReader>& reader) {
+std::string serializeMvt(Api& request, const std::shared_ptr<baldr::GraphReader>& reader, const boost::property_tree::ptree* config) {
   // Use the MVT serializer to convert the API data
-  return MvtSerializer::serialize(request, request.options().format(), reader);
+  return MvtSerializer::serialize(request, request.options().format(), reader, config);
 }
 
 } // namespace tyr

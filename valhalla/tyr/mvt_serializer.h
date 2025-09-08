@@ -33,10 +33,12 @@ public:
    * @param api The API response containing routing data
    * @param format The output format (should be MVT)
    * @param graph_reader The graph reader to access routing data (optional, will create if not provided)
+   * @param config The configuration for zoom-based filtering (optional)
    * @return MVT data as a string
    */
   static std::string serialize(const valhalla::Api& api, const valhalla::Options_Format& format,
-                              const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader = nullptr);
+                              const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader = nullptr,
+                              const boost::property_tree::ptree* config = nullptr);
 
   /**
    * Generate an MVT tile for a specific bounding box and zoom level
@@ -98,11 +100,13 @@ private:
    * @param y The tile y coordinate
    * @param bbox The tile bounding box
    * @param graph_reader The graph reader to access routing data (optional)
+   * @param config The configuration for zoom-based filtering (optional)
    * @return MVT protobuf data as binary string
    */
   static std::string generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t y,
                                         const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
-                                        const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader = nullptr);
+                                        const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader = nullptr,
+                                        const boost::property_tree::ptree* config = nullptr);
 
   static constexpr uint32_t MVT_TILE_SIZE = 4096;
 

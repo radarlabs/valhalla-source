@@ -16,11 +16,11 @@ namespace tyr {
 
 struct actor_t::pimpl_t {
   pimpl_t(const boost::property_tree::ptree& config)
-      : reader(new baldr::GraphReader(config.get_child("mjolnir"))), loki_worker(config, reader),
+      : config(config), reader(new baldr::GraphReader(config.get_child("mjolnir"))), loki_worker(config, reader),
         thor_worker(config, reader), odin_worker(config) {
   }
   pimpl_t(const boost::property_tree::ptree& config, baldr::GraphReader& graph_reader)
-      : reader(&graph_reader, [](baldr::GraphReader*) {}), loki_worker(config, reader),
+      : config(config), reader(&graph_reader, [](baldr::GraphReader*) {}), loki_worker(config, reader),
         thor_worker(config, reader), odin_worker(config) {
   }
   void set_interrupts(const std::function<void()>* interrupt_function) {
@@ -33,6 +33,7 @@ struct actor_t::pimpl_t {
     thor_worker.cleanup();
     odin_worker.cleanup();
   }
+  boost::property_tree::ptree config;
   std::shared_ptr<baldr::GraphReader> reader;
   loki::loki_worker_t loki_worker;
   thor::thor_worker_t thor_worker;
@@ -85,7 +86,7 @@ std::string actor_t::act(Api& api, const std::function<void()>* interrupt) {
         LOG_INFO("ACTOR DEBUG: Handling tile action");
         LOG_INFO("ACTOR DEBUG: About to call serializeMvt");
         try {
-          auto response = serializeMvt(api, pimpl->reader);
+          auto response = serializeMvt(api, pimpl->reader, &pimpl->config);
           LOG_INFO("ACTOR DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
           return response;
         } catch (const std::exception& e) {
