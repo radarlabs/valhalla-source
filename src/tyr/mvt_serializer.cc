@@ -571,16 +571,84 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             road.set_point(coord.first, coord.second);
           }
 
-          // Add road properties
-          // road.add_property("type", "road");
+          // Add basic road properties
           road.add_property("classification", std::to_string(static_cast<int>(edge->classification())));
-          // road.add_property("speed", std::to_string(edge->speed()));
-          // road.add_property("use", std::to_string(static_cast<int>(edge->use())));
+          road.add_property("speed", static_cast<int64_t>(edge->speed()));
+          road.add_property("length", static_cast<int64_t>(edge->length()));
+          road.add_property("surface", static_cast<int64_t>(edge->surface()));
+          road.add_property("use", static_cast<int64_t>(edge->use()));
+          road.add_property("toll", edge->toll());
+          road.add_property("roundabout", edge->roundabout());
+          road.add_property("lanecount", static_cast<int64_t>(edge->lanecount()));
+          road.add_property("density", static_cast<int64_t>(edge->density()));
+
+          // Add traffic-related properties
+          if (edge->has_flow_speed()) {
+            // Free flow speed (nighttime/no traffic)
+            if (edge->free_flow_speed() > 0) {
+              road.add_property("free_flow_speed", static_cast<int64_t>(edge->free_flow_speed()));
+            }
+
+            // Constrained flow speed (daytime/traffic)
+            if (edge->constrained_flow_speed() > 0) {
+              road.add_property("constrained_flow_speed", static_cast<int64_t>(edge->constrained_flow_speed()));
+            }
+
+            // Predicted speed flag
+            if (edge->has_predicted_speed()) {
+              road.add_property("has_predicted_speed", true);
+            }
+          }
+
+          // Get live traffic speed if available
+          if (tile->get_traffic_tile()()) {
+            try {
+              // Get current live traffic speed
+              uint8_t flow_sources = 0;
+              uint32_t current_speed = tile->GetSpeed(edge, baldr::kCurrentFlowMask, 0, false, &flow_sources);
+              if (flow_sources & baldr::kCurrentFlowMask) {
+                road.add_property("current_traffic_speed", static_cast<int64_t>(current_speed));
+                road.add_property("has_live_traffic", true);
+
+                // Calculate speed bucket based on live traffic vs free flow speed
+                if (edge->free_flow_speed() > 0) {
+                  double speed_ratio = static_cast<double>(current_speed) / static_cast<double>(edge->free_flow_speed());
+                  int64_t speed_bucket = 0;
+
+                  if (speed_ratio < 0.10) {
+                    speed_bucket = 1; // Under 10% - Severe congestion
+                  } else if (speed_ratio < 0.25) {
+                    speed_bucket = 2; // Under 25% - Heavy congestion
+                  } else if (speed_ratio < 0.65) {
+                    speed_bucket = 3; // Under 65% - Moderate congestion
+                  } else if (speed_ratio < 1.00) {
+                    speed_bucket = 4; // Under 100% - Light congestion
+                  } else {
+                    speed_bucket = 5; // 100%+ - Free flow or better
+                  }
+
+                  road.add_property("speed_bucket", speed_bucket);
+                  road.add_property("speed_ratio", static_cast<double>(speed_ratio));
+                }
+              }
+
+              // Get predicted speed for current time (if available)
+              if (edge->has_predicted_speed()) {
+                uint32_t predicted_speed = tile->GetSpeed(edge, baldr::kPredictedFlowMask, 0, false, &flow_sources);
+                if (flow_sources & baldr::kPredictedFlowMask) {
+                  road.add_property("predicted_speed", static_cast<int64_t>(predicted_speed));
+                }
+              }
+            } catch (const std::exception& e) {
+              // Traffic data might not be available for this edge, continue without it
+              LOG_DEBUG("MVT DEBUG: Could not get traffic data for edge: " + std::string(e.what()));
+            }
+          }
 
           // Add road name if available
           auto names = edge_info.GetNames();
           if (!names.empty()) {
-            // road.add_property("name", names[0]);
+            road.add_property("name", names[0]);
           }
 
           road.commit();
