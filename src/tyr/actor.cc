@@ -85,7 +85,7 @@ std::string actor_t::act(Api& api, const std::function<void()>* interrupt) {
         LOG_INFO("ACTOR DEBUG: Handling tile action");
         LOG_INFO("ACTOR DEBUG: About to call serializeMvt");
         try {
-          auto response = serializeMvt(api);
+          auto response = serializeMvt(api, pimpl->reader);
           LOG_INFO("ACTOR DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
           return response;
         } catch (const std::exception& e) {

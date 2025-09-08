@@ -87,7 +87,7 @@ odin_worker_t::work(const std::list<zmq::message_t>& job,
         // since the Tyr actor is not part of the HTTP worker pipeline
         try {
           LOG_INFO("ODIN DEBUG: About to call serializeMvt");
-          auto response = tyr::serializeMvt(request);
+          auto response = tyr::serializeMvt(request, nullptr);
           LOG_INFO("ODIN DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
 
           // Create the response with MVT content type
