@@ -43,38 +43,6 @@ public:
 
 private:
   /**
-   * Convert lat/lng coordinates to MVT tile coordinates (0-4096)
-   * @param point The lat/lng point
-   * @param bbox The tile bounding box
-   * @param zoom The zoom level
-   * @return MVT coordinates as (x, y)
-   */
-  static std::pair<int32_t, int32_t> pointToMvtCoords(
-      const valhalla::midgard::PointLL& point,
-      const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
-      uint32_t zoom);
-
-  /**
-   * Create an MVT feature for a road edge
-   * @param coords The MVT coordinates for the edge
-   * @param edge The directed edge
-   * @param edge_info The edge info
-   * @return MVT feature as a string
-   */
-  static std::string createEdgeFeature(const std::vector<std::pair<int32_t, int32_t>>& coords,
-                                      const valhalla::baldr::DirectedEdge* edge,
-                                      const valhalla::baldr::EdgeInfo* edge_info);
-
-  /**
-   * Create an MVT feature for a node
-   * @param coords The MVT coordinates for the node
-   * @param node The node info
-   * @return MVT feature as a string
-   */
-  static std::string createNodeFeature(const std::pair<int32_t, int32_t>& coords,
-                                      const valhalla::baldr::NodeInfo* node);
-
-  /**
    * Calculate the lat/lng bounds for a tile at given z/x/y coordinates
    * @param z The zoom level
    * @param x The tile x coordinate

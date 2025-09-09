@@ -11,11 +11,176 @@
 #include "midgard/aabb2.h"
 #include "midgard/util.h"
 #include "loki/node_search.h"
+#include <optional>
+#include <utility>
+#include <vector>
+#include <cmath>
+#include <algorithm>
 
 // protozero is required by vtzero
 #include "third_party/protozero/include/protozero/pbf_reader.hpp"
 // vtzero for MVT encoding
 #include "third_party/vtzero/include/vtzero/builder.hpp"
+
+// Bitmasks for Cohen–Sutherland line clipping
+enum OutCode {
+  INSIDE = 0, LEFT = 1, RIGHT = 2, BOTTOM = 4, TOP = 8
+};
+
+inline int computeOutCode(double x, double y, double minX, double minY, double maxX, double maxY) {
+  int code = INSIDE;
+  if (x < minX) code |= LEFT;
+  else if (x > maxX) code |= RIGHT;
+  if (y < minY) code |= TOP;       // Note: y=0 is top in MVT
+  else if (y > maxY) code |= BOTTOM;
+  return code;
+}
+
+// Clip a segment (in tile coords) to the tile box [0,4095]
+std::vector<std::pair<int32_t,int32_t>> clipSegment(
+  double x0, double y0, double x1, double y1,
+  double minX=0.0, double minY=0.0, double maxX=4095.0, double maxY=4095.0)
+{
+  int outcode0 = computeOutCode(x0, y0, minX, minY, maxX, maxY);
+  int outcode1 = computeOutCode(x1, y1, minX, minY, maxX, maxY);
+
+  bool accept = false;
+  while (true) {
+    if (!(outcode0 | outcode1)) {
+      accept = true; break; // both inside
+    } else if (outcode0 & outcode1) {
+      break; // both outside same edge
+    } else {
+      double x, y;
+      int outcodeOut = outcode0 ? outcode0 : outcode1;
+
+      if (outcodeOut & TOP) {
+        x = x0 + (x1 - x0) * (minY - y0) / (y1 - y0);
+        y = minY;
+      } else if (outcodeOut & BOTTOM) {
+        x = x0 + (x1 - x0) * (maxY - y0) / (y1 - y0);
+        y = maxY;
+      } else if (outcodeOut & RIGHT) {
+        y = y0 + (y1 - y0) * (maxX - x0) / (x1 - x0);
+        x = maxX;
+      } else {
+        y = y0 + (y1 - y0) * (minX - x0) / (x1 - x0);
+        x = minX;
+      }
+
+      if (outcodeOut == outcode0) {
+        x0 = x; y0 = y; outcode0 = computeOutCode(x0, y0, minX, minY, maxX, maxY);
+      } else {
+        x1 = x; y1 = y; outcode1 = computeOutCode(x1, y1, minX, minY, maxX, maxY);
+      }
+    }
+  }
+
+  std::vector<std::pair<int32_t,int32_t>> clipped;
+  if (accept) {
+    clipped.emplace_back(static_cast<int32_t>(std::round(x0)), static_cast<int32_t>(std::round(y0)));
+    clipped.emplace_back(static_cast<int32_t>(std::round(x1)), static_cast<int32_t>(std::round(y1)));
+  }
+  return clipped;
+}
+
+// Build a tile-local clipped LineString
+std::vector<std::pair<int32_t,int32_t>> buildClippedLineString(
+  const std::vector<valhalla::midgard::PointLL>& coords, uint32_t z, uint32_t x, uint32_t y)
+{
+  std::vector<std::pair<int32_t,int32_t>> result;
+
+  // Helper function to convert lat/lng to tile-relative coordinates using z,x,y directly
+  auto convertToTileCoords = [z, x, y](const valhalla::midgard::PointLL& latlng) -> std::optional<std::pair<int32_t, int32_t>> {
+    uint32_t n = 1 << z;
+    double lon_deg_per_tile = 360.0 / n;
+
+    double min_lon = x * lon_deg_per_tile - 180.0;
+    double max_lon = (x + 1) * lon_deg_per_tile - 180.0;
+    double x_ratio = (latlng.lng() - min_lon) / (max_lon - min_lon);
+
+    double min_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * (y + 1.0) / n)));
+    double max_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * y / n)));
+    double min_lat = min_lat_rad * 180.0 / M_PI;
+    double max_lat = max_lat_rad * 180.0 / M_PI;
+
+    double y_ratio = (max_lat - latlng.lat()) / (max_lat - min_lat);
+
+    if (x_ratio < 0.0 || x_ratio > 1.0 || y_ratio < 0.0 || y_ratio > 1.0) {
+      return std::nullopt;
+    }
+
+    double tile_x = x_ratio * 4096.0;
+    double tile_y = y_ratio * 4096.0;
+
+    if (std::abs(x_ratio) < 1e-10) tile_x = 0.0;
+    else if (std::abs(x_ratio - 1.0) < 1e-10) tile_x = 4095.0;
+
+    if (std::abs(y_ratio) < 1e-10) tile_y = 0.0;
+    else if (std::abs(y_ratio - 1.0) < 1e-10) tile_y = 4095.0;
+
+    int32_t final_x = static_cast<int32_t>(std::round(tile_x));
+    int32_t final_y = static_cast<int32_t>(std::round(tile_y));
+
+    final_x = std::max(0, std::min(4095, final_x));
+    final_y = std::max(0, std::min(4095, final_y));
+
+    return {{final_x, final_y}};
+  };
+
+  for (size_t i = 1; i < coords.size(); ++i) {
+    auto p0 = convertToTileCoords(coords[i-1]);
+    auto p1 = convertToTileCoords(coords[i]);
+
+    if (p0 && p1) {
+      // Both inside - check for zero-length segment
+      if (*p0 != *p1) {
+        if (result.empty()) result.push_back(*p0);
+        result.push_back(*p1);
+      }
+    } else {
+      // At least one outside → try clipping in tile coordinates
+      // First project raw coords into tile-relative floats
+      auto toTileFloat = [&](const valhalla::midgard::PointLL& ll) {
+        uint32_t n = 1 << z;
+        double lon_deg_per_tile = 360.0 / n;
+        double min_lon = x * lon_deg_per_tile - 180.0;
+        double max_lon = (x + 1) * lon_deg_per_tile - 180.0;
+        double x_ratio = (ll.lng() - min_lon) / (max_lon - min_lon);
+
+        double min_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * (y + 1.0) / n)));
+        double max_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * y / n)));
+        double min_lat = min_lat_rad * 180.0 / M_PI;
+        double max_lat = max_lat_rad * 180.0 / M_PI;
+
+        double y_ratio = (max_lat - ll.lat()) / (max_lat - min_lat);
+
+        return std::make_pair(x_ratio * 4096.0, y_ratio * 4096.0);
+      };
+
+      auto [x0, y0] = toTileFloat(coords[i-1]);
+      auto [x1, y1] = toTileFloat(coords[i]);
+
+      // Skip zero-length segments before clipping
+      if (x0 == x1 && y0 == y1) {
+        continue;
+      }
+
+      auto clipped = clipSegment(x0, y0, x1, y1);
+      if (!clipped.empty() && clipped.size() >= 2) {
+        // Check if clipped segment has zero length
+        if (clipped[0] != clipped[1]) {
+          if (result.empty() || result.back() != clipped.front()) {
+            result.push_back(clipped.front());
+          }
+          result.push_back(clipped.back());
+        }
+      }
+    }
+  }
+
+  return result;
+}
 
 #include <sstream>
 #include <vector>
@@ -91,80 +256,6 @@ std::string MvtSerializer::serialize(const valhalla::Api& api, const valhalla::O
   }
 }
 
-
-std::pair<int32_t, int32_t> MvtSerializer::pointToMvtCoords(
-    const valhalla::midgard::PointLL& point,
-    const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
-    uint32_t zoom) {
-
-  // Convert lat/lng to MVT tile coordinates (0-4096)
-  // This should be relative to the tile bounds, not global tile coordinates
-
-  double lat = point.lat();
-  double lng = point.lng();
-
-  // Get tile bounds
-  double min_lat = bbox.miny();
-  double max_lat = bbox.maxy();
-  double min_lng = bbox.minx();
-  double max_lng = bbox.maxx();
-
-  // Convert to MVT coordinates (0-4096)
-  // Normalize the point within the tile bounds
-  double x_ratio = (lng - min_lng) / (max_lng - min_lng);
-  double y_ratio = (lat - min_lat) / (max_lat - min_lat);
-
-  // Note: MVT uses y=0 at the top, so we invert the y coordinate
-  int32_t x = static_cast<int32_t>(x_ratio * MVT_TILE_SIZE);
-  int32_t y = static_cast<int32_t>((1.0 - y_ratio) * MVT_TILE_SIZE);
-
-  // Clamp to tile bounds
-  x = std::max(0, std::min(x, static_cast<int32_t>(MVT_TILE_SIZE - 1)));
-  y = std::max(0, std::min(y, static_cast<int32_t>(MVT_TILE_SIZE - 1)));
-
-  return {x, y};
-}
-
-std::string MvtSerializer::createEdgeFeature(const std::vector<std::pair<int32_t, int32_t>>& coords,
-                                            const valhalla::baldr::DirectedEdge* edge,
-                                            const valhalla::baldr::EdgeInfo* edge_info) {
-  std::ostringstream oss;
-
-  oss << "{\"type\":\"Feature\",\"geometry\":{";
-  oss << "\"type\":\"LineString\",\"coordinates\":[";
-
-  for (size_t i = 0; i < coords.size(); ++i) {
-    if (i > 0) oss << ",";
-    oss << "[" << coords[i].first << "," << coords[i].second << "]";
-  }
-
-  oss << "]},\"properties\":{";
-  oss << "\"edge_id\":" << edge->edgeinfo_offset() << ",";
-  oss << "\"road_class\":" << static_cast<int>(edge->classification()) << ",";
-  oss << "\"speed\":" << edge->speed() << ",";
-  oss << "\"oneway\":" << (edge->forward() && !edge->reverseaccess()) << ",";
-  // auto names = edge_info->GetNames();
-  // std::string name = names.empty() ? "unnamed" : names[0];
-  // oss << "\"name\":\"" << name << "\"";
-  oss << "}}";
-
-  return oss.str();
-}
-
-std::string MvtSerializer::createNodeFeature(const std::pair<int32_t, int32_t>& coords,
-                                            const valhalla::baldr::NodeInfo* node) {
-  std::ostringstream oss;
-
-  oss << "{\"type\":\"Feature\",\"geometry\":{";
-  oss << "\"type\":\"Point\",\"coordinates\":[" << coords.first << "," << coords.second << "]";
-  oss << "},\"properties\":{";
-  auto point = node->latlng(valhalla::midgard::PointLL(0, 0)); // Use dummy tile corner for now
-  oss << "\"node_id\":" << point.lat() << ",";
-  oss << "\"type\":\"intersection\"";
-  oss << "}}";
-
-  return oss.str();
-}
 
 valhalla::midgard::AABB2<valhalla::midgard::PointLL> MvtSerializer::calculateTileBounds(uint32_t z, uint32_t x, uint32_t y) {
     // Convert tile coordinates to lat/lng bounds using standard Web Mercator tiling
@@ -244,18 +335,6 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             // Add real Valhalla road data
       LOG_INFO("MVT DEBUG: Extracting real Valhalla road data");
 
-      // Helper function to convert lat/lng to tile-relative coordinates
-      auto convertToTileCoords = [&bbox](const valhalla::midgard::PointLL& latlng) -> std::pair<int32_t, int32_t> {
-        double x = (latlng.lng() - bbox.minx()) / (bbox.maxx() - bbox.minx()) * 4096;
-        // Note: MVT uses y=0 at the top, so we invert the y coordinate
-        double y = (bbox.maxy() - latlng.lat()) / (bbox.maxy() - bbox.miny()) * 4096;
-
-        // Clamp coordinates to tile bounds (0-4095)
-        x = std::max(0.0, std::min(4095.0, x));
-        y = std::max(0.0, std::min(4095.0, y));
-
-        return {static_cast<int32_t>(x), static_cast<int32_t>(y)};
-      };
 
       // Extract real Valhalla road data from graph tiles
       LOG_INFO("MVT DEBUG: Reading real Valhalla graph tiles");
@@ -375,34 +454,40 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             continue;
           }
 
-          // Convert edge coordinates to tile-relative and filter duplicates/zero-length segments
-          std::vector<std::pair<int32_t, int32_t>> tile_coords;
-          std::pair<int32_t, int32_t> last_coord = {-1, -1};
-          bool edge_in_bounds = false;
-
-          for (const auto& point : shape) {
-            auto coord = convertToTileCoords(point);
-
-            // Check if this coordinate is within the MVT tile bounds (0-4096)
-            if (coord.first >= 0 && coord.first <= 4096 && coord.second >= 0 && coord.second <= 4096) {
-              edge_in_bounds = true;
-            }
-
-            // Skip duplicate coordinates (zero-length segments)
-            if (coord != last_coord) {
-              tile_coords.push_back(coord);
-              last_coord = coord;
-            }
-          }
-
-          // Skip if edge is completely outside the MVT tile bounds
-          if (!edge_in_bounds) {
-            continue;
-          }
+          // Use clipped line string to handle edges that cross tile boundaries
+          auto tile_coords = buildClippedLineString(shape, z, x, y);
 
           // Skip if we don't have enough points for a valid linestring
           if (tile_coords.size() < 2) {
             continue;
+          }
+
+          // Filter out zero-length segments and duplicate consecutive points
+          std::vector<std::pair<int32_t, int32_t>> filtered_coords;
+          filtered_coords.reserve(tile_coords.size());
+
+          for (size_t i = 0; i < tile_coords.size(); ++i) {
+            if (i == 0 || tile_coords[i] != tile_coords[i-1]) {
+              filtered_coords.push_back(tile_coords[i]);
+            }
+          }
+
+          // Skip if we don't have enough points after filtering duplicates
+          if (filtered_coords.size() < 2) {
+            continue;
+          }
+
+          // Check for zero-length linestring (all points are the same)
+          bool has_zero_length = true;
+          for (size_t i = 1; i < filtered_coords.size(); ++i) {
+            if (filtered_coords[i] != filtered_coords[0]) {
+              has_zero_length = false;
+              break;
+            }
+          }
+
+          if (has_zero_length) {
+            continue; // Skip zero-length linestrings
           }
 
           // Filter by road class based on zoom level
@@ -455,9 +540,9 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           // Create individual MVT feature for this road (no merging for now)
           vtzero::linestring_feature_builder road{layer};
           road.set_id(feature_id++);
-          road.add_linestring(tile_coords.size());
+          road.add_linestring(filtered_coords.size());
 
-          for (const auto& coord : tile_coords) {
+          for (const auto& coord : filtered_coords) {
             road.set_point(coord.first, coord.second);
           }
 
