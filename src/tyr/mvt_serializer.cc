@@ -213,9 +213,9 @@ std::string MvtSerializer::createEdgeFeature(const std::vector<std::pair<int32_t
   oss << "\"road_class\":" << static_cast<int>(edge->classification()) << ",";
   oss << "\"speed\":" << edge->speed() << ",";
   oss << "\"oneway\":" << (edge->forward() && !edge->reverseaccess()) << ",";
-  auto names = edge_info->GetNames();
-  std::string name = names.empty() ? "unnamed" : names[0];
-  oss << "\"name\":\"" << name << "\"";
+  // auto names = edge_info->GetNames();
+  // std::string name = names.empty() ? "unnamed" : names[0];
+  // oss << "\"name\":\"" << name << "\"";
   oss << "}}";
 
   return oss.str();
@@ -299,16 +299,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
                std::to_string(bbox.minx()) + "," + std::to_string(bbox.miny()) + " to " +
                std::to_string(bbox.maxx()) + "," + std::to_string(bbox.maxy()));
 
-      // For NYC tile 14/4824/6159, expected bounds should be roughly:
-      // Longitude: -74.3 to -74.2 (Manhattan area)
-      // Latitude: 40.7 to 40.8 (Manhattan area)
 
-    // TODO: In a full implementation, we would:
-    // 1. Use GraphReader to access Valhalla graph tiles
-    // 2. Iterate through edges and nodes in the tile bounds
-    // 3. Convert lat/lng coordinates to tile-relative coordinates (0-4096)
-    // 4. Create LineString features for roads and Point features for intersections
-    // 5. Add road properties like speed, road class, names, etc.
 
         try {
       // Create a tile builder
@@ -316,17 +307,6 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
 
             // Create a layer for roads (extent defaults to 4096)
       vtzero::layer_builder layer{tile, "roads"};
-
-      // No point features - only road segments
-      // This will now only generate LineString features for roads
-      // Either real Valhalla data or fallback grid roads
-
-      // Road segments will be created below
-
-      // Add some sample road features based on the tile bounds
-      // These represent where we would place actual road data from Valhalla
-      // Note: MVT coordinates are tile-relative (0-4096), not lat/lng
-      // When we add real Valhalla data, we'll convert lat/lng to tile-relative coordinates
 
       // No point features - only LineString road segments will be created
       LOG_INFO("MVT DEBUG: Skipping point features, focusing on road segments only");
@@ -347,50 +327,6 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
         return {static_cast<int32_t>(x), static_cast<int32_t>(y)};
       };
 
-
-
-      // TODO: Get GraphReader from context - for now we'll create sample road data
-      // In a full implementation, we would:
-      // 1. Get GraphReader from the calling context
-      // 2. Find graph tiles that intersect with the tile bounds
-      // 3. Iterate through edges in those tiles
-      // 4. Extract edge geometry and properties
-
-      // For now, let's create realistic road features based on the tile bounds
-      // These represent where real roads would be placed
-
-      // Example of how we would extract real Valhalla data:
-      //
-      // GraphReader reader;
-      // std::vector<GraphId> tile_ids = reader.GetTileSet(bbox);
-      //
-      // for (const auto& tile_id : tile_ids) {
-      //   auto tile = reader.GetGraphTile(tile_id);
-      //   if (!tile) continue;
-      //
-      //   for (const auto& edge : tile->GetDirectedEdges()) {
-      //     // Get edge geometry
-      //     auto shape = tile->edgeinfo(edge.edgeinfo_offset()).shape();
-      //
-      //     // Convert coordinates to tile-relative
-      //     std::vector<std::pair<int32_t, int32_t>> tile_coords;
-      //     for (const auto& point : shape) {
-      //       tile_coords.push_back(convertToTileCoords(point));
-      //     }
-      //
-      //     // Create LineString feature
-      //     vtzero::linestring_feature_builder road{layer};
-      //     road.set_id(edge.edgeinfo_offset());
-      //     road.add_linestring(tile_coords.size());
-      //     for (const auto& coord : tile_coords) {
-      //       road.set_point(coord.first, coord.second);
-      //     }
-      //     road.add_property("road_class", std::to_string(edge.road_class()));
-      //     road.add_property("speed", std::to_string(edge.speed()));
-      //     road.commit();
-      //   }
-      // }
-
       // Extract real Valhalla road data from graph tiles
       LOG_INFO("MVT DEBUG: Reading real Valhalla graph tiles");
 
@@ -398,7 +334,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
       // Note: In a full implementation, this would be passed in from the calling context
       // For now, we'll create a temporary reader to demonstrate the concept
 
-                  try {
+        try {
         // Use provided GraphReader or create a new one if not provided
         std::shared_ptr<valhalla::baldr::GraphReader> reader;
         if (graph_reader) {
@@ -477,6 +413,30 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           const auto* edge = tile->directededge(edge_id);
           if (!edge) continue;
 
+          // Get the opposing edge (backward direction)
+          graph_tile_ptr opp_tile = nullptr;
+          const auto* opp_edge = reader->GetOpposingEdge(edge_id, opp_tile);
+
+          if (opp_edge && opp_tile) {
+
+            try {
+
+              uint8_t flow_sources_forward = 0;
+              uint32_t current_speed_forward = tile->GetSpeed(edge, baldr::kCurrentFlowMask, 0, false, &flow_sources_forward);
+
+              uint8_t flow_sources_opp = 0;
+              uint32_t current_speed_opp = opp_tile->GetSpeed(opp_edge, baldr::kCurrentFlowMask, 0, false, &flow_sources_opp);
+
+              if (flow_sources_opp & baldr::kCurrentFlowMask && ((flow_sources_forward & baldr::kCurrentFlowMask && current_speed_opp < current_speed_forward) || !(flow_sources_forward & baldr::kCurrentFlowMask))) { // Use the slower of the two edges
+                edge = opp_edge;
+                tile = opp_tile;
+              }
+
+            } catch (const std::exception& e) {
+              LOG_ERROR("MVT DEBUG: Could not get traffic data for edge: " + std::string(e.what()));
+            }
+          }
+
           // Get edge info for geometry and properties
           const auto& edge_info = tile->edgeinfo(edge);
           auto shape = edge_info.shape();
@@ -520,13 +480,13 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           bool road_class_allowed = false;
 
           if (config) {
-          // Use configuration-based road class filtering
-          uint32_t class_0_min_zoom = config->get("map_tile.valhalla_road_class_0_min_zoom", 5);
-          uint32_t class_1_min_zoom = config->get("map_tile.valhalla_road_class_1_min_zoom", 7);
-          uint32_t class_2_min_zoom = config->get("map_tile.valhalla_road_class_2_min_zoom", 12);
-          uint32_t class_3_min_zoom = config->get("map_tile.valhalla_road_class_3_min_zoom", 12);
-          uint32_t class_4_min_zoom = config->get("map_tile.valhalla_road_class_4_min_zoom", 12);
-          uint32_t all_classes_min_zoom = config->get("map_tile.valhalla_all_road_classes_min_zoom", 12);
+            // Use configuration-based road class filtering
+            uint32_t class_0_min_zoom = config->get("map_tile.valhalla_road_class_0_min_zoom", 5);
+            uint32_t class_1_min_zoom = config->get("map_tile.valhalla_road_class_1_min_zoom", 7);
+            uint32_t class_2_min_zoom = config->get("map_tile.valhalla_road_class_2_min_zoom", 12);
+            uint32_t class_3_min_zoom = config->get("map_tile.valhalla_road_class_3_min_zoom", 12);
+            uint32_t class_4_min_zoom = config->get("map_tile.valhalla_road_class_4_min_zoom", 12);
+            uint32_t all_classes_min_zoom = config->get("map_tile.valhalla_all_road_classes_min_zoom", 12);
 
             if (z >= all_classes_min_zoom) {
               road_class_allowed = true; // All road classes allowed
@@ -541,22 +501,22 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             } else if (road_class == 4 && z >= class_4_min_zoom) {
               road_class_allowed = true; // Tertiary
             }
-        } else {
-          // Fallback to hardcoded values (matching the default configuration)
-          if (z >= 12) {
-            road_class_allowed = true; // All road classes at zoom 12+
-          } else if (road_class == 0 && z >= 5) {
-            road_class_allowed = true; // Motorway at zoom 5+
-          } else if (road_class == 1 && z >= 7) {
-            road_class_allowed = true; // Trunk at zoom 7+
-          } else if (road_class == 2 && z >= 12) {
-            road_class_allowed = true; // Primary at zoom 12+
-          } else if (road_class == 3 && z >= 12) {
-            road_class_allowed = true; // Secondary at zoom 12+
-          } else if (road_class == 4 && z >= 12) {
-            road_class_allowed = true; // Tertiary at zoom 12+
+          } else {
+            // Fallback to hardcoded values (matching the default configuration)
+            if (z >= 12) {
+              road_class_allowed = true; // All road classes at zoom 12+
+            } else if (road_class == 0 && z >= 5) {
+              road_class_allowed = true; // Motorway at zoom 5+
+            } else if (road_class == 1 && z >= 7) {
+              road_class_allowed = true; // Trunk at zoom 7+
+            } else if (road_class == 2 && z >= 12) {
+              road_class_allowed = true; // Primary at zoom 12+
+            } else if (road_class == 3 && z >= 12) {
+              road_class_allowed = true; // Secondary at zoom 12+
+            } else if (road_class == 4 && z >= 12) {
+              road_class_allowed = true; // Tertiary at zoom 12+
+            }
           }
-        }
 
           if (!road_class_allowed) {
             continue; // Skip this road class at this zoom level
@@ -619,7 +579,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
                     speed_bucket = 1; // Under 10% - Severe congestion
                   } else if (speed_ratio < 0.25) {
                     speed_bucket = 2; // Under 25% - Heavy congestion
-                  } else if (speed_ratio < 0.65) {
+                  } else if (speed_ratio < 0.60) {
                     speed_bucket = 3; // Under 65% - Moderate congestion
                   } else if (speed_ratio < 1.00) {
                     speed_bucket = 4; // Under 100% - Light congestion
@@ -646,18 +606,18 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           }
 
           // Add road name if available
-          auto names = edge_info.GetNames();
-          if (!names.empty()) {
-            road.add_property("name", names[0]);
-          }
+          // auto names = edge_info.GetNames();
+          // if (!names.empty()) {
+          //   road.add_property("name", names[0]);
+          // }
 
           road.commit();
           roads_found++;
           edges_processed++;
 
           // Limit the number of roads to avoid overwhelming the tile
-          if (roads_found >= 500000) {
-            LOG_INFO("MVT DEBUG: Reached road limit (500000), stopping extraction");
+          if (roads_found >= 1000000) {
+            LOG_INFO("MVT DEBUG: Reached road limit (1000000), stopping extraction");
             break;
           }
         }
