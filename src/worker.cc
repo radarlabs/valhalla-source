@@ -1506,6 +1506,11 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
   LOG_INFO("TILE DEBUG: request.path.find(\"/tile/\") == 0: " + std::to_string(request.path.find("/tile/") == 0));
 
   if (request.path == "/tile" || request.path.find("/tile/") == 0) {
+    // Only allow GET requests for tile endpoints
+    if (request.method != method_t::GET) {
+      throw valhalla_exception_t{101, "Tile endpoint only supports GET requests"};
+    }
+
     LOG_INFO("TILE DEBUG: Inside tile handling block");
     LOG_INFO("TILE DEBUG: Parsed coordinates: request.path=" + request.path);
 

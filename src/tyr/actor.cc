@@ -436,8 +436,8 @@ actor_t::tile(const std::string& request_str, const std::function<void()>* inter
     // Default zoom level
     uint32_t z = 14;
 
-    // Generate MVT tile
-    auto mvt_data = tyr::MvtSerializer::generateTile(bbox, z, pimpl->reader);
+    // Generate MVT tile using proper tile coordinates
+    auto mvt_data = tile_xyz(z, 0, 0, interrupt);
 
     // if they want you do to do the cleanup automatically
     if (auto_cleanup) {
@@ -469,8 +469,13 @@ actor_t::tile_xyz(uint32_t z, uint32_t x, uint32_t y, const std::function<void()
   midgard::PointLL ne(north, east);
   auto bbox = midgard::AABB2<midgard::PointLL>(west, south, east, north);
 
-  // Generate MVT tile
-  auto mvt_data = tyr::MvtSerializer::generateTile(bbox, z, pimpl->reader);
+  // Generate MVT tile using proper MVT serializer
+  // Create a mock API request for the tile
+  Api api;
+  api.mutable_options()->set_format(Options_Format_mvt);
+  api.mutable_options()->set_id(std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y));
+
+  auto mvt_data = tyr::serializeMvt(api, pimpl->reader, &pimpl->config);
 
   // if they want you do to do the cleanup automatically
   if (auto_cleanup) {

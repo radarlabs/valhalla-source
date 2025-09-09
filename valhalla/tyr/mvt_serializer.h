@@ -40,16 +40,6 @@ public:
                               const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader = nullptr,
                               const boost::property_tree::ptree* config = nullptr);
 
-  /**
-   * Generate an MVT tile for a specific bounding box and zoom level
-   * @param bbox The bounding box for the tile
-   * @param zoom The zoom level
-   * @param graph_reader The graph reader to access routing data
-   * @return MVT tile data as a string
-   */
-  static std::string generateTile(const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
-                                 uint32_t zoom,
-                                 const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader);
 
 private:
   /**
