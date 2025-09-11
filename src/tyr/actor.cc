@@ -391,7 +391,7 @@ actor_t::tile(const std::string& request_str, const std::function<void()>* inter
   ParseApi(request_str, Options::tile, *api);
 
   // Check if we have tile coordinates in the id field (from HTTP route parsing)
-  if (api->options().has_id()) {
+  if (!api->options().id().empty()) {
     std::string tile_id = api->options().id();
 
     // Parse z/x/y from the id field (format: "z/x/y")
