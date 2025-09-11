@@ -84,91 +84,58 @@ std::vector<std::pair<int32_t,int32_t>> clipSegment(
   return clipped;
 }
 
+// --- Web Mercator conversion helpers ---
+inline double lonToWorldX(double lon) {
+  return (lon + 180.0) / 360.0; // normalized 0..1
+}
+
+inline double latToWorldY(double lat) {
+  double rad = lat * M_PI / 180.0;
+  double merc = std::log(std::tan(M_PI/4.0 + rad/2.0));
+  return (1.0 - merc / M_PI) / 2.0; // normalized 0..1
+}
+
+// Convert a lat/lng to tile-local coordinates in [0,4095]
+inline std::pair<double,double> projectToTile(
+  const valhalla::midgard::PointLL& ll, uint32_t z, uint32_t x, uint32_t y)
+{
+  uint32_t n = 1 << z;
+  double worldX = lonToWorldX(ll.lng());
+  double worldY = latToWorldY(ll.lat());
+
+  double scale = 4096.0; // MVT extent
+  double tileX = (worldX * n - x) * scale;
+  double tileY = (worldY * n - y) * scale;
+  return {tileX, tileY};
+}
+
 // Build a tile-local clipped LineString
 std::vector<std::pair<int32_t,int32_t>> buildClippedLineString(
   const std::vector<valhalla::midgard::PointLL>& coords, uint32_t z, uint32_t x, uint32_t y)
 {
   std::vector<std::pair<int32_t,int32_t>> result;
 
-  // Helper function to convert lat/lng to tile-relative coordinates using z,x,y directly
-  auto convertToTileCoords = [z, x, y](const valhalla::midgard::PointLL& latlng) -> std::optional<std::pair<int32_t, int32_t>> {
-    uint32_t n = 1 << z;
-    double lon_deg_per_tile = 360.0 / n;
-
-    double min_lon = x * lon_deg_per_tile - 180.0;
-    double max_lon = (x + 1) * lon_deg_per_tile - 180.0;
-    double x_ratio = (latlng.lng() - min_lon) / (max_lon - min_lon);
-
-    double min_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * (y + 1.0) / n)));
-    double max_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * y / n)));
-    double min_lat = min_lat_rad * 180.0 / M_PI;
-    double max_lat = max_lat_rad * 180.0 / M_PI;
-
-    double y_ratio = (max_lat - latlng.lat()) / (max_lat - min_lat);
-
-    if (x_ratio < 0.0 || x_ratio > 1.0 || y_ratio < 0.0 || y_ratio > 1.0) {
-      return std::nullopt;
-    }
-
-    double tile_x = x_ratio * 4096.0;
-    double tile_y = y_ratio * 4096.0;
-
-    if (std::abs(x_ratio) < 1e-10) tile_x = 0.0;
-    else if (std::abs(x_ratio - 1.0) < 1e-10) tile_x = 4095.0;
-
-    if (std::abs(y_ratio) < 1e-10) tile_y = 0.0;
-    else if (std::abs(y_ratio - 1.0) < 1e-10) tile_y = 4095.0;
-
-    int32_t final_x = static_cast<int32_t>(std::round(tile_x));
-    int32_t final_y = static_cast<int32_t>(std::round(tile_y));
-
-    final_x = std::max(0, std::min(4095, final_x));
-    final_y = std::max(0, std::min(4095, final_y));
-
-    return {{final_x, final_y}};
-  };
-
   for (size_t i = 1; i < coords.size(); ++i) {
-    auto p0 = convertToTileCoords(coords[i-1]);
-    auto p1 = convertToTileCoords(coords[i]);
+    auto [x0f, y0f] = projectToTile(coords[i-1], z, x, y);
+    auto [x1f, y1f] = projectToTile(coords[i],   z, x, y);
 
-    if (p0 && p1) {
-      // Both inside - check for zero-length segment
-      if (*p0 != *p1) {
-        if (result.empty()) result.push_back(*p0);
-        result.push_back(*p1);
+    int32_t x0 = static_cast<int32_t>(std::round(x0f));
+    int32_t y0 = static_cast<int32_t>(std::round(y0f));
+    int32_t x1 = static_cast<int32_t>(std::round(x1f));
+    int32_t y1 = static_cast<int32_t>(std::round(y1f));
+
+    // If both inside and not zero-length
+    if (x0 >= 0 && x0 <= 4095 && y0 >= 0 && y0 <= 4095 &&
+        x1 >= 0 && x1 <= 4095 && y1 >= 0 && y1 <= 4095) {
+      if (x0 != x1 || y0 != y1) {
+        if (result.empty()) result.emplace_back(x0, y0);
+        result.emplace_back(x1, y1);
       }
     } else {
-      // At least one outside → try clipping in tile coordinates
-      // First project raw coords into tile-relative floats
-      auto toTileFloat = [&](const valhalla::midgard::PointLL& ll) {
-        uint32_t n = 1 << z;
-        double lon_deg_per_tile = 360.0 / n;
-        double min_lon = x * lon_deg_per_tile - 180.0;
-        double max_lon = (x + 1) * lon_deg_per_tile - 180.0;
-        double x_ratio = (ll.lng() - min_lon) / (max_lon - min_lon);
-
-        double min_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * (y + 1.0) / n)));
-        double max_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * y / n)));
-        double min_lat = min_lat_rad * 180.0 / M_PI;
-        double max_lat = max_lat_rad * 180.0 / M_PI;
-
-        double y_ratio = (max_lat - ll.lat()) / (max_lat - min_lat);
-
-        return std::make_pair(x_ratio * 4096.0, y_ratio * 4096.0);
-      };
-
-      auto [x0, y0] = toTileFloat(coords[i-1]);
-      auto [x1, y1] = toTileFloat(coords[i]);
-
-      // Skip zero-length segments before clipping
-      if (x0 == x1 && y0 == y1) {
-        continue;
-      }
-
-      auto clipped = clipSegment(x0, y0, x1, y1);
+      // Clip against tile bounds
+      if (x0f == x1f && y0f == y1f) continue; // skip zero-length
+      auto clipped = clipSegment(x0f, y0f, x1f, y1f);
       if (!clipped.empty() && clipped.size() >= 2) {
-        // Check if clipped segment has zero length
         if (clipped[0] != clipped[1]) {
           if (result.empty() || result.back() != clipped.front()) {
             result.push_back(clipped.front());
@@ -241,8 +208,10 @@ std::string MvtSerializer::serialize(const valhalla::Api& api, const valhalla::O
 
     // Calculate tile bounds (will be used for actual tile generation later)
     auto bbox = calculateTileBounds(z, x, y);
-    (void)bbox; // Suppress unused variable warning for now
-    LOG_INFO("MVT DEBUG: Calculated tile bounds");
+    LOG_INFO("MVT DEBUG: Calculated tile bounds: min_lat=" + std::to_string(bbox.miny()) +
+             " max_lat=" + std::to_string(bbox.maxy()) +
+             " min_lon=" + std::to_string(bbox.minx()) +
+             " max_lon=" + std::to_string(bbox.maxx()));
 
           // Generate actual MVT protobuf data
       LOG_INFO("MVT DEBUG: Generating MVT protobuf data");
@@ -266,33 +235,22 @@ valhalla::midgard::AABB2<valhalla::midgard::PointLL> MvtSerializer::calculateTil
 
   // Convert tile coordinates to longitude/latitude
   double lon_deg_per_tile = 360.0 / n;
-  double lat_rad_per_tile = M_PI / n;
 
   double min_lon = x * lon_deg_per_tile - 180.0;
   double max_lon = (x + 1) * lon_deg_per_tile - 180.0;
 
   // Convert y to latitude using proper Web Mercator projection
   // y=0 is at the top (north), y=n-1 is at the bottom (south)
-  double min_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * (y + 1.0) / n)));
+  // Web Mercator has a maximum latitude of approximately ±85.0511 degrees
   double max_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * y / n)));
+  double min_lat_rad = atan(sinh(M_PI * (1.0 - 2.0 * (y + 1.0) / n)));
 
-  double min_lat = min_lat_rad * 180.0 / M_PI;
   double max_lat = max_lat_rad * 180.0 / M_PI;
+  double min_lat = min_lat_rad * 180.0 / M_PI;
 
-  // Log the calculation details
-  LOG_INFO("MVT DEBUG: Tile calculation for z=" + std::to_string(z) + " x=" + std::to_string(x) + " y=" + std::to_string(y));
-  LOG_INFO("MVT DEBUG: n = 2^" + std::to_string(z) + " = " + std::to_string(n));
-  LOG_INFO("MVT DEBUG: lon_deg_per_tile = 360.0 / " + std::to_string(n) + " = " + std::to_string(lon_deg_per_tile));
-  LOG_INFO("MVT DEBUG: lat_rad_per_tile = π / " + std::to_string(n) + " = " + std::to_string(lat_rad_per_tile));
-  LOG_INFO("MVT DEBUG: min_lon = " + std::to_string(x) + " * " + std::to_string(lon_deg_per_tile) + " - 180.0 = " + std::to_string(min_lon));
-  LOG_INFO("MVT DEBUG: max_lon = (" + std::to_string(x) + " + 1) * " + std::to_string(lon_deg_per_tile) + " - 180.0 = " + std::to_string(max_lon));
-  LOG_INFO("MVT DEBUG: min_lat_rad = atan(sinh(π * (1.0 - 2.0 * (" + std::to_string(y) + " + 1.0) / " + std::to_string(n) + "))) = " + std::to_string(min_lat_rad));
-  LOG_INFO("MVT DEBUG: max_lat_rad = atan(sinh(π * (1.0 - 2.0 * " + std::to_string(y) + " / " + std::to_string(n) + "))) = " + std::to_string(max_lat_rad));
-  LOG_INFO("MVT DEBUG: min_lat = " + std::to_string(min_lat_rad) + " * 180.0 / π = " + std::to_string(min_lat));
-  LOG_INFO("MVT DEBUG: max_lat = " + std::to_string(max_lat_rad) + " * 180.0 / π = " + std::to_string(max_lat));
-  LOG_INFO("MVT DEBUG: Final bounds: (" + std::to_string(min_lon) + ", " + std::to_string(min_lat) + ") to (" + std::to_string(max_lon) + ", " + std::to_string(max_lat) + ")");
-
-
+  // Log tile bounds for debugging
+  LOG_INFO("MVT DEBUG: Tile bounds z=" + std::to_string(z) + " x=" + std::to_string(x) + " y=" + std::to_string(y) +
+           " -> lon[" + std::to_string(min_lon) + "," + std::to_string(max_lon) + "] lat[" + std::to_string(min_lat) + "," + std::to_string(max_lat) + "]");
 
   return valhalla::midgard::AABB2<valhalla::midgard::PointLL>(
     valhalla::midgard::PointLL(min_lon, min_lat),
@@ -541,6 +499,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           vtzero::linestring_feature_builder road{layer};
           road.set_id(feature_id++);
           road.add_linestring(filtered_coords.size());
+
 
           for (const auto& coord : filtered_coords) {
             road.set_point(coord.first, coord.second);
