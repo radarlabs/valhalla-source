@@ -369,12 +369,22 @@ loki_worker_t::work(const std::list<zmq::message_t>& job,
   try {
     // request parsing
     LOG_INFO("LOKI DEBUG: About to parse HTTP request");
+    LOG_INFO("LOKI DEBUG: Job data size: " + std::to_string(job.front().size()));
     auto http_request =
         prime_server::http_request_t::from_string(static_cast<const char*>(job.front().data()),
                                                   job.front().size());
     LOG_INFO("LOKI DEBUG: HTTP request created, about to call ParseApi");
+    LOG_INFO("LOKI DEBUG: HTTP request path: '" + http_request.path + "'");
+    LOG_INFO("LOKI DEBUG: HTTP request method: " + std::to_string(static_cast<int>(http_request.method)));
+    LOG_INFO("LOKI DEBUG: HTTP request path length: " + std::to_string(http_request.path.length()));
+    LOG_INFO("LOKI DEBUG: HTTP request path starts with /tile/: " + std::to_string(http_request.path.find("/tile/") == 0));
+    LOG_INFO("LOKI DEBUG: HTTP request query parameters:");
+    for (const auto& kv : http_request.query) {
+      LOG_INFO("LOKI DEBUG: Query param: " + kv.first + " = " + (kv.second.empty() ? "empty" : kv.second.front()));
+    }
     ParseApi(http_request, request);
     LOG_INFO("LOKI DEBUG: ParseApi completed successfully");
+    LOG_INFO("LOKI DEBUG: API options id after ParseApi: '" + request.options().id() + "'");
     const auto& options = request.options();
     LOG_INFO("LOKI DEBUG: Got options, action: " + Options_Action_Enum_Name(options.action()));
 

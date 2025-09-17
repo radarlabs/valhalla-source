@@ -64,7 +64,8 @@ private:
   static std::string generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t y,
                                         const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
                                         const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader = nullptr,
-                                        const boost::property_tree::ptree* config = nullptr);
+                                        const boost::property_tree::ptree* config = nullptr,
+                                        const valhalla::Api& api = valhalla::Api());
 
   static constexpr uint32_t MVT_TILE_SIZE = 4096;
 

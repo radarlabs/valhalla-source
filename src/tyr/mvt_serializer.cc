@@ -7,6 +7,7 @@
 #include "baldr/nodeinfo.h"
 #include "baldr/directededge.h"
 #include "baldr/edgeinfo.h"
+#include "baldr/time_info.h"
 #include "midgard/pointll.h"
 #include "midgard/aabb2.h"
 #include "midgard/util.h"
@@ -279,7 +280,7 @@ std::string MvtSerializer::serialize(const valhalla::Api& api, const valhalla::O
     // Calculate tile bounds (will be used for actual tile generation later)
     auto bbox = calculateTileBounds(z, x, y);
 
-      std::string mvt_data = generateMvtProtobuf(z, x, y, bbox, graph_reader, config);
+        std::string mvt_data = generateMvtProtobuf(z, x, y, bbox, graph_reader, config, api);
       LOG_INFO("MVT DEBUG: Generated MVT protobuf, size: " + std::to_string(mvt_data.size()));
       return mvt_data;
 
@@ -325,7 +326,8 @@ valhalla::midgard::AABB2<valhalla::midgard::PointLL> MvtSerializer::calculateTil
 std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t y,
                                                const valhalla::midgard::AABB2<valhalla::midgard::PointLL>& bbox,
                                                const std::shared_ptr<valhalla::baldr::GraphReader>& graph_reader,
-                                               const boost::property_tree::ptree* config) {
+                                               const boost::property_tree::ptree* config,
+                                               const valhalla::Api& api) {
 
     LOG_INFO("MVT DEBUG: Processing MVT tile " + std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y));
 
@@ -549,45 +551,103 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             }
           }
 
-          // Get live traffic speed if available
+          // Get traffic speed (live or historic based on time parameter)
           if (tile->get_traffic_tile()()) {
             try {
-              // Get current live traffic speed
-              uint8_t flow_sources = 0;
-              uint32_t current_speed = tile->GetSpeed(edge, baldr::kCurrentFlowMask, 0, false, &flow_sources);
-              if (flow_sources & baldr::kCurrentFlowMask) {
-                road.add_property("current_traffic_speed", static_cast<int64_t>(current_speed));
-                road.add_property("has_live_traffic", true);
+              // Determine which traffic data to use based on API options
+              uint64_t seconds_of_week = baldr::kInvalidSecondsOfWeek;
+              uint64_t seconds_from_now = 0;
 
-                // Calculate speed bucket based on live traffic vs free flow speed
-                if (edge->free_flow_speed() > 0) {
-                  double speed_ratio = static_cast<double>(current_speed) / static_cast<double>(edge->free_flow_speed());
-                  int64_t speed_bucket = 0;
-
-                  if (speed_ratio == 0) {
-                    speed_bucket = 0; // No traffic
-                  } else if (speed_ratio < 0.10) {
-                    speed_bucket = 1; // Under 10% - Severe congestion
-                  } else if (speed_ratio < 0.25) {
-                    speed_bucket = 2; // Under 25% - Heavy congestion
-                  } else if (speed_ratio < 0.60) {
-                    speed_bucket = 3; // Under 65% - Moderate congestion
-                  } else {
-                    speed_bucket = 4; // 100%+ - Free flow or better
+              // Check if a specific time was requested
+              if (api.options().has_date_time()) {
+                LOG_INFO("MVT DEBUG: Time parameter found: " + api.options().date_time());
+                // Parse the requested time and convert to seconds of week for historic traffic
+                try {
+                  std::string date_time = api.options().date_time();
+                  auto time_info = baldr::TimeInfo::make(date_time, 0, nullptr);
+                  if (time_info.valid) {
+                    seconds_of_week = time_info.second_of_week;
+                    seconds_from_now = time_info.negative_seconds_from_now ?
+                      -static_cast<int64_t>(time_info.seconds_from_now) :
+                      static_cast<int64_t>(time_info.seconds_from_now);
+                    LOG_INFO("MVT DEBUG: Parsed time - seconds_of_week: " + std::to_string(seconds_of_week) + ", seconds_from_now: " + std::to_string(seconds_from_now));
                   }
-
-                  road.add_property("speed_bucket", speed_bucket);
-                  road.add_property("speed_ratio", static_cast<double>(speed_ratio));
+                } catch (const std::exception& e) {
+                  // If time parsing fails, fall back to current traffic
+                  LOG_DEBUG("Failed to parse time parameter, using current traffic: " + std::string(e.what()));
                 }
+              } else {
+                LOG_INFO("MVT DEBUG: No time parameter found, using current traffic");
+              }
+
+              // Get both current and historic traffic speeds
+              uint8_t current_flow_sources = 0;
+              uint8_t historic_flow_sources = 0;
+
+              // Always get current traffic speed (use current flow mask to get live traffic data)
+              uint32_t current_speed = tile->GetSpeed(edge, baldr::kCurrentFlowMask, 0, false, &current_flow_sources);
+
+              // Get historic traffic speed if time parameter is specified
+              uint32_t historic_speed = 0;
+              bool has_historic_data = false;
+              if (api.options().has_date_time()) {
+                historic_speed = tile->GetSpeed(edge, baldr::kPredictedFlowMask, seconds_of_week, false, &historic_flow_sources, seconds_from_now);
+                has_historic_data = (historic_flow_sources & baldr::kPredictedFlowMask);
+              }
+
+              // Determine which speed to use as the primary "traffic_speed" property
+              uint32_t primary_speed;
+
+              if (api.options().has_date_time()) {
+                // If time parameter is specified, use historic speed (with free flow fallback)
+                primary_speed = has_historic_data ? historic_speed : edge->free_flow_speed();
+              } else {
+                // If no time parameter, use current speed (with free flow fallback)
+                bool has_current_data = (current_flow_sources & baldr::kCurrentFlowMask);
+                primary_speed = has_current_data ? current_speed : edge->free_flow_speed();
+              }
+
+
+              // Always add current speed (with free flow fallback if no current data)
+              bool has_current_data = (current_flow_sources & baldr::kCurrentFlowMask);
+              uint32_t current_speed_final = has_current_data ? current_speed : edge->free_flow_speed();
+              road.add_property("current_speed", static_cast<int64_t>(current_speed_final));
+
+              // Add historic speed if time parameter was specified
+              if (api.options().has_date_time()) {
+                uint32_t historic_speed_final = has_historic_data ? historic_speed : edge->free_flow_speed();
+                road.add_property("historic_speed", static_cast<int64_t>(historic_speed_final));
+              }
+
+              // Calculate speed bucket based on traffic vs free flow speed
+              if (edge->free_flow_speed() > 0) {
+                double speed_ratio = static_cast<double>(primary_speed) / static_cast<double>(edge->free_flow_speed());
+                int64_t speed_bucket = 0;
+
+                if (speed_ratio == 0) {
+                  speed_bucket = 0; // No traffic
+                } else if (speed_ratio < 0.10) {
+                  speed_bucket = 1; // Under 10% - Severe congestion
+                } else if (speed_ratio < 0.25) {
+                  speed_bucket = 2; // Under 25% - Heavy congestion
+                } else if (speed_ratio < 0.60) {
+                  speed_bucket = 3; // Under 65% - Moderate congestion
+                } else {
+                  speed_bucket = 4; // 100%+ - Free flow or better
+                }
+
+                road.add_property("speed_bucket", speed_bucket);
+                road.add_property("speed_ratio", static_cast<double>(speed_ratio));
               }
 
               // Get predicted speed for current time (if available)
-              if (edge->has_predicted_speed()) {
-                uint32_t predicted_speed = tile->GetSpeed(edge, baldr::kPredictedFlowMask, 0, false, &flow_sources);
-                if (flow_sources & baldr::kPredictedFlowMask) {
-                  road.add_property("predicted_speed", static_cast<int64_t>(predicted_speed));
-                }
-              }
+              // if (edge->has_predicted_speed()) {
+              //   uint8_t predicted_flow_sources = 0;
+              //   uint32_t predicted_speed = tile->GetSpeed(edge, baldr::kPredictedFlowMask, 0, false, &predicted_flow_sources);
+              //   if (predicted_flow_sources & baldr::kPredictedFlowMask) {
+              //     road.add_property("predicted_speed", static_cast<int64_t>(predicted_speed));
+              //   }
+              // }
             } catch (const std::exception& e) {
               // Traffic data might not be available for this edge, continue without it
               LOG_DEBUG("MVT DEBUG: Could not get traffic data for edge: " + std::string(e.what()));
