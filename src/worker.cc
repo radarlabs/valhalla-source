@@ -1659,7 +1659,7 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
   }
 
   // Debug: Check if time parameter was set
-  if (api.options().has_date_time()) {
+  if (api.options().has_date_time_case()) {
     LOG_INFO("PARSEAPI DEBUG: Time parameter set in API options: " + api.options().date_time());
   } else {
     LOG_INFO("PARSEAPI DEBUG: No time parameter in API options");

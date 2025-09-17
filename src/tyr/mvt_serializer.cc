@@ -559,7 +559,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
               uint64_t seconds_from_now = 0;
 
               // Check if a specific time was requested
-              if (api.options().has_date_time()) {
+              if (api.options().has_date_time_case()) {
                 LOG_INFO("MVT DEBUG: Time parameter found: " + api.options().date_time());
                 // Parse the requested time and convert to seconds of week for historic traffic
                 try {
@@ -590,7 +590,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
               // Get historic traffic speed if time parameter is specified
               uint32_t historic_speed = 0;
               bool has_historic_data = false;
-              if (api.options().has_date_time()) {
+              if (api.options().has_date_time_case()) {
                 historic_speed = tile->GetSpeed(edge, baldr::kPredictedFlowMask, seconds_of_week, false, &historic_flow_sources, seconds_from_now);
                 has_historic_data = (historic_flow_sources & baldr::kPredictedFlowMask);
               }
@@ -598,7 +598,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
               // Determine which speed to use as the primary "traffic_speed" property
               uint32_t primary_speed;
 
-              if (api.options().has_date_time()) {
+              if (api.options().has_date_time_case()) {
                 // If time parameter is specified, use historic speed (with free flow fallback)
                 primary_speed = has_historic_data ? historic_speed : edge->free_flow_speed();
               } else {
@@ -614,7 +614,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
               road.add_property("current_speed", static_cast<int64_t>(current_speed_final));
 
               // Add historic speed if time parameter was specified
-              if (api.options().has_date_time()) {
+              if (api.options().has_date_time_case()) {
                 uint32_t historic_speed_final = has_historic_data ? historic_speed : edge->free_flow_speed();
                 road.add_property("historic_speed", static_cast<int64_t>(historic_speed_final));
               }

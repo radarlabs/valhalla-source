@@ -100,7 +100,7 @@ odin_worker_t::work(const std::list<zmq::message_t>& job,
         }
 
         // Check if time parameter is set
-        if (request.options().has_date_time()) {
+        if (request.options().has_date_time_case()) {
           LOG_INFO("ODIN DEBUG: Time parameter set: " + request.options().date_time());
         } else {
           LOG_INFO("ODIN DEBUG: No time parameter set, using current traffic");
