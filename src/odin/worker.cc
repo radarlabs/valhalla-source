@@ -6,6 +6,7 @@
 #include "odin/util.h"
 #include "proto/trip.pb.h"
 #include "tyr/serializers.h"
+#include "tyr/actor.h"
 
 #include <boost/property_tree/ptree.hpp>
 
@@ -21,7 +22,7 @@ namespace valhalla {
 namespace odin {
 
 odin_worker_t::odin_worker_t(const boost::property_tree::ptree& config)
-    : service_worker_t(config), markup_formatter_(config) {
+    : service_worker_t(config), markup_formatter_(config), config_(config) {
   // signal that the worker started successfully
   started();
 }
@@ -82,20 +83,18 @@ odin_worker_t::work(const std::list<zmq::message_t>& job,
         break;
       }
       case Options::tile: {
-        LOG_INFO("ODIN DEBUG: Processing tile action");
-        // For tile requests, we need to generate the MVT response here
-        // since the Tyr actor is not part of the HTTP worker pipeline
+        LOG_INFO("ODIN DEBUG: Calling Tyr actor directly for tile request");
+        // For tile requests, we need to call the Tyr actor directly
+        // since the Tyr actor is not part of the worker pipeline
         try {
-          LOG_INFO("ODIN DEBUG: About to call serializeMvt");
-          auto response = tyr::serializeMvt(request, nullptr, nullptr);
-          LOG_INFO("ODIN DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
-
-          // Create the response with MVT content type
+          // Create a Tyr actor to handle the tile request
+          valhalla::tyr::actor_t actor(config_);
+          auto response = actor.act(request);
           result = to_response(response, info, request);
-          LOG_INFO("ODIN DEBUG: Response created successfully");
+          LOG_INFO("ODIN DEBUG: Tyr actor completed successfully, response size: " + std::to_string(response.size()));
         } catch (const std::exception& e) {
-          LOG_ERROR("ODIN DEBUG: serializeMvt failed with error: " + std::string(e.what()));
-          throw valhalla_exception_t{400, std::string("MVT generation failed: ") + e.what()};
+          LOG_ERROR("ODIN DEBUG: Tyr actor failed with error: " + std::string(e.what()));
+          throw valhalla_exception_t{400, std::string("Tyr actor failed: ") + e.what()};
         }
         break;
       }

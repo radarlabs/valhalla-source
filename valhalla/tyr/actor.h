@@ -237,7 +237,8 @@ public:
    * @return MVT tile data
    */
   std::string tile_xyz(uint32_t z, uint32_t x, uint32_t y,
-                       const std::function<void()>* interrupt = nullptr);
+                       const std::function<void()>* interrupt = nullptr,
+                       Api* api = nullptr);
 
 protected:
   struct pimpl_t;

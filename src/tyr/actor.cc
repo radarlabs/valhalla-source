@@ -84,13 +84,13 @@ std::string actor_t::act(Api& api, const std::function<void()>* interrupt) {
       return status("", interrupt, &api);
       case Options::tile:
         LOG_INFO("ACTOR DEBUG: Handling tile action");
-        LOG_INFO("ACTOR DEBUG: About to call serializeMvt");
+        LOG_INFO("ACTOR DEBUG: About to call tile function");
         try {
-          auto response = serializeMvt(api, pimpl->reader, &pimpl->config);
-          LOG_INFO("ACTOR DEBUG: serializeMvt completed successfully, response size: " + std::to_string(response.size()));
+          auto response = tile("", interrupt, &api);
+          LOG_INFO("ACTOR DEBUG: tile function completed successfully, response size: " + std::to_string(response.size()));
           return response;
         } catch (const std::exception& e) {
-          LOG_ERROR("ACTOR DEBUG: serializeMvt failed with error: " + std::string(e.what()));
+          LOG_ERROR("ACTOR DEBUG: tile function failed with error: " + std::string(e.what()));
           throw;
         }
     default:
@@ -409,7 +409,7 @@ actor_t::tile(const std::string& request_str, const std::function<void()>* inter
         uint32_t y = std::stoul(parts[2]);
 
         // Use the tile_xyz function for proper tile generation
-        auto mvt_data = tile_xyz(z, x, y, interrupt);
+        auto mvt_data = tile_xyz(z, x, y, interrupt, api);
         return mvt_data;
 
       } catch (const std::exception& e) {
@@ -437,7 +437,7 @@ actor_t::tile(const std::string& request_str, const std::function<void()>* inter
     uint32_t z = 14;
 
     // Generate MVT tile using proper tile coordinates
-    auto mvt_data = tile_xyz(z, 0, 0, interrupt);
+    auto mvt_data = tile_xyz(z, 0, 0, interrupt, api);
 
     // if they want you do to do the cleanup automatically
     if (auto_cleanup) {
@@ -452,7 +452,7 @@ actor_t::tile(const std::string& request_str, const std::function<void()>* inter
 }
 
 std::string
-actor_t::tile_xyz(uint32_t z, uint32_t x, uint32_t y, const std::function<void()>* interrupt) {
+actor_t::tile_xyz(uint32_t z, uint32_t x, uint32_t y, const std::function<void()>* interrupt, Api* api) {
   // set the interrupts
   pimpl->set_interrupts(interrupt);
 
@@ -470,12 +470,12 @@ actor_t::tile_xyz(uint32_t z, uint32_t x, uint32_t y, const std::function<void()
   auto bbox = midgard::AABB2<midgard::PointLL>(west, south, east, north);
 
   // Generate MVT tile using proper MVT serializer
-  // Create a mock API request for the tile
-  Api api;
-  api.mutable_options()->set_format(Options_Format_mvt);
-  api.mutable_options()->set_id(std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y));
+  // Use the existing API object that was already parsed and configured
+  api->mutable_options()->set_format(Options_Format_mvt);
+  api->mutable_options()->set_id(std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y));
 
-  auto mvt_data = tyr::serializeMvt(api, pimpl->reader, &pimpl->config);
+  LOG_INFO("ACTOR DEBUG: About to call serializeMvt with config pointer: " + std::to_string(reinterpret_cast<uintptr_t>(&pimpl->config)));
+  auto mvt_data = tyr::serializeMvt(*api, pimpl->reader, &pimpl->config);
 
   // if they want you do to do the cleanup automatically
   if (auto_cleanup) {
