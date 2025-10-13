@@ -151,7 +151,6 @@ class InrixTrafficProvider {
       try {
         const row = await segmentsStatement.get(segmentId);
 
-
         if (!row) {
           return;
         }
