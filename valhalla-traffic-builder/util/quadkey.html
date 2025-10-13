@@ -1,43 +1,31 @@
-import path from 'path';
-import { fork } from 'child_process';
-import { fileURLToPath } from 'url';
+<!DOCTYPE html>
+<html>
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+<head>
+  <meta charset="utf-8" />
+  <title>Draw Quadkeys on MapLibre</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
 
-const start = Date.now();
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+  </style>
+</head>
 
+<body>
+  <div id="map"></div>
 
-function divideArrayIntoChunks(array, numChunks) {
-  const chunkSize = Math.floor(array.length / numChunks);
-  const remainder = array.length % numChunks;
-  const result = [];
-
-  let start = 0;
-  for (let i = 0; i < numChunks; i++) {
-      const end = start + chunkSize + (i < remainder ? 1 : 0);
-      result.push(array.slice(start, end));
-      start = end;
-  }
-
-  return result;
-}
-
-// inrix is bounded by Microsoft quadkey: https://learn.microsoft.com/en-us/bingmaps/articles/bing-maps-tile-system?redirectedfrom=MSDN
-const args = process.argv.slice(2);
-
-const processes = parseInt(args[0].split('=')[1]);
-const valhallaPath = args[1].split('=')[1]
-const trafficPath = args[2].split('=')[1];
-const inputPath = args[3].split('=')[1];
-const useIncidents = args[4].split('=')[1];
-
-
-
-// const quadkeys = ['0302231', '0302233', '0302320', '0302322', '0302321', '0302323', '0320101', '0320110' ]; // New York State Quadkeys
-
-const incidents = useIncidents === 'true' ? ['40.145289,-80.452881,45.552525,-70.452881'] : []
-
+  <script>
 
 const quadkeys = [
   "0231203",
@@ -629,48 +617,112 @@ const quadkeys = [
   "2110020",
   "1220100"
 ]
-
-
-
-console.log(`Ingesting ${quadkeys.length} quadkeys at date: ${new Date().toISOString()}.`);
-
-const procssesWorkTraffic = divideArrayIntoChunks(quadkeys, processes);
-const procssesWorkIncidents = divideArrayIntoChunks(incidents, processes);
-
-// create and manage a forked process for each region
-const forkProcess = (processIndex, trafficWork, incidentWork) => new Promise((resolve, reject) => {
-  const start = Date.now();
-  const workerPath = path.join(__dirname, './src/InrixRegionWorker.js');
-  console.log(`Starting process ${processIndex} with traffic work ${trafficWork.slice(0, 20)} of length ${trafficWork.length} and incident work ${incidentWork.slice(0, 20)} of length ${incidentWork.length}.`)
-  const child = fork(workerPath, [processIndex, valhallaPath, trafficPath, inputPath, trafficWork, incidentWork.join('|')]);
-
-  child.on('exit', (code) => {
-    if (code === 0) {
-      console.log(`${processIndex} done. Completed in ${(Date.now() - start) / 1000} seconds.`);
-      resolve();
-    } else {
-      reject(new Error(`${processIndex} failed with code ${code}`));
+// Convert a quadkey to XYZ
+    function quadkeyToTile(quadkey) {
+      let x = 0, y = 0;
+      const z = quadkey.length;
+      for (let i = 0; i < z; i++) {
+        const bit = z - i;
+        const mask = 1 << (bit - 1);
+        switch (quadkey[i]) {
+          case '1':
+            x |= mask;
+            break;
+          case '2':
+            y |= mask;
+            break;
+          case '3':
+            x |= mask;
+            y |= mask;
+            break;
+        }
+      }
+      return { x, y, z };
     }
-  });
 
-  child.on('error', (err) => {
-    reject(new Error(`Error in process for ${processIndex}: ${err.message}`));
-  });
-});
+    // Convert tile coordinates to lat/lon bounds
+    function tileToBounds(x, y, z) {
+      const n = Math.pow(2, z);
+      const lon_min = x / n * 360.0 - 180.0;
+      const lon_max = (x + 1) / n * 360.0 - 180.0;
 
-async function main() {
-  try {
-    // fork processes for each process
-    const downloadPromises = procssesWorkTraffic.map((trafficWork, index) => forkProcess(index, trafficWork, procssesWorkIncidents[index]));
+      const lat_rad_min = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+      const lat_rad_max = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n)));
+      const lat_min = lat_rad_min * (180 / Math.PI);
+      const lat_max = lat_rad_max * (180 / Math.PI);
 
-    // wait for all processes to complete
-    await Promise.all(downloadPromises);
+      return [lon_min, lat_min, lon_max, lat_max];
+    }
 
-    console.log('Done. Completed in', (Date.now() - start) / 1000, 'seconds');
-  } catch (error) {
-    console.error('An error occurred:', error);
-  }
-}
+    // Initialize map
+    const map = new maplibregl.Map({
+      container: 'map',
+      // style: 'https://demotiles.maplibre.org/style.json',
+      style: 'https://api.radar.io/maps/styles/radar-default-v1?publishableKey=prj_live_pk_21d246b87698c16eb0c034bda8210886cec3ef04',
+      center: [-73.9851, 40.7589], // NYC
+      zoom: 6
+    });
 
-// Run the main function
-main();
+    map.on('load', () => {
+      const features = quadkeys.map(qk => {
+        const { x, y, z } = quadkeyToTile(qk);
+        const [lonMin, latMin, lonMax, latMax] = tileToBounds(x, y, z);
+
+        return {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[
+              [lonMin, latMin],
+              [lonMax, latMin],
+              [lonMax, latMax],
+              [lonMin, latMax],
+              [lonMin, latMin]
+            ]]
+          },
+          properties: { quadkey: qk, z }
+        };
+      });
+
+      map.addSource('quadkeys', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features
+        }
+      });
+
+      map.addLayer({
+        id: 'quadkey-borders',
+        type: 'line',
+        source: 'quadkeys',
+        paint: {
+          'line-color': '#FF0000',
+          'line-width': 1
+        }
+      });
+
+      map.addLayer({
+        id: 'quadkey-fill',
+        type: 'fill',
+        source: 'quadkeys',
+        paint: {
+          'fill-color': '#FF0000',
+          'fill-opacity': 0.1
+        }
+      });
+
+      // Fit map to all quadkeys
+      const coords = features.flatMap(f => f.geometry.coordinates[0]);
+      const lons = coords.map(c => c[0]);
+      const lats = coords.map(c => c[1]);
+      const bounds = [
+        [Math.min(...lons), Math.min(...lats)],
+        [Math.max(...lons), Math.max(...lats)]
+      ];
+      map.fitBounds(bounds, { padding: 50 });
+    });
+  </script>
+</body>
+
+</html>
