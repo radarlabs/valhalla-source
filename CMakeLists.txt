@@ -465,6 +465,8 @@ if(ENABLE_NAPI_BINDINGS)
       /usr/local/include/node/node_modules/node-addon-api
       /valhalla-traffic-builder/node_modules/node-addon-api
       $ENV{HOME}/valhalla-traffic-builder/node_modules/node-addon-api
+      /valhalla-source/valhalla-traffic-builder/node_modules/node-addon-api
+      $ENV{HOME}/valhalla-source/valhalla-traffic-builder/node_modules/node-addon-api
       $ENV{HOME}/.nvm/versions/node/${NODE_VERSION}/lib/node_modules/node-addon-api # your local dev path
       ${CMAKE_JS_INC}
     PATH_SUFFIXES node-addon-api

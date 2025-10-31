@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # remove data from previous runs
-rm ./ways_to_edges.db*
+rm -f ./ways_to_edges.db*
 
 # separate data by | instead of comma to handle variable column widths
 

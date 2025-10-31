@@ -49,7 +49,7 @@ Running the traffic builder will update the traffic.tar with Inrix Traffic with 
 
 
 ```bash
-npm run build-inrix-traffic -- --processes=12 --valhallaPath='./node_bindings.node' --trafficPath='../valhalla-server/traffic.tar' --inputPath='./input'
+npm run build-inrix-traffic -- --processes=12 --valhallaPath='./node_bindings.node' --trafficPath='../valhalla-server/traffic.tar' --inputPath='./input' --useIncidents=false
 ```
 
 Valhalla Traffic Builder uses NAPI to call Valhalla code to update the traffic.tar. The repo already contains a `node_bindings.node` file checked into to it. If you wanted to make updates to the `node_bindings.node` you can rebuild following these [steps](../README_RADAR.md#2-valhalla-traffic-worker) and modify the path

@@ -1,4 +1,3 @@
-
 # README Radar
 Read me for Radar Fork.
 
@@ -174,10 +173,12 @@ mv way_edges.txt ./data/ways_to_edges.csv
 
 **Building xds_segments.db**
 
+Building a sqlite DB of Inrix xds segments to OSM ids
+
 ```bash
 mkdir -p ./data/inrix-edges-csv
 s5cmd cp  --concurrency 256 "s3://io.radar.valhalla/inrix-conflation/*" ./data/inrix-edges-csv
-./radar_traffic_tools/build_db.sh
+./radar_traffic_tools/build_segments.sh
 ```
 
 

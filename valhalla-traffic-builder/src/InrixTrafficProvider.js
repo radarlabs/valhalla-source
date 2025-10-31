@@ -121,7 +121,6 @@ class InrixTrafficProvider {
   static async processLiveData(batch, db, segmentsStatement) {
     if (batch.error) {
       console.log(`Error fetching data for quadkey ${batch.quadkey}:`, batch.error.message);
-      Sentry.captureMessage(`Error fetching data for quadkey ${batch.quadkey}: ${batch.error.message}`);
       return;
     }
 
@@ -162,7 +161,6 @@ class InrixTrafficProvider {
         const placeholders = osmIds.map(() => '?').join(', ');
         const sql = `SELECT * FROM edges WHERE way_id IN (${placeholders})`;
         const rows = await db.all(sql, osmIds);
-
 
         for (let i = 0; i < osmIds.length; i++) {
           const direction = directions[i] === 'P' ? 1 : 0;
@@ -261,7 +259,6 @@ class InrixTrafficProvider {
   static async processIncidents(batch, db) {
     if (batch.error) {
       console.log(`Error fetching data for incident ${batch.incident}:`, batch.error.message);
-      Sentry.captureMessage(`Error fetching data for incident ${batch.incident}: ${batch.error.message}`);
       return;
     }
 
