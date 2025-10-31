@@ -298,9 +298,8 @@ std::string MvtSerializer::serialize(const valhalla::Api& api, const valhalla::O
     // Calculate tile bounds (will be used for actual tile generation later)
     auto bbox = calculateTileBounds(z, x, y);
 
-        std::string mvt_data = generateMvtProtobuf(z, x, y, bbox, graph_reader, config, api);
-      LOG_INFO("MVT DEBUG: Generated MVT protobuf, size: " + std::to_string(mvt_data.size()));
-      return mvt_data;
+    std::string mvt_data = generateMvtProtobuf(z, x, y, bbox, graph_reader, config, api);
+    return mvt_data;
 
   } catch (const std::exception& e) {
     LOG_ERROR("MVT DEBUG: Failed to parse tile coordinates: " + std::string(e.what()));
@@ -330,10 +329,6 @@ valhalla::midgard::AABB2<valhalla::midgard::PointLL> MvtSerializer::calculateTil
 
   double max_lat = max_lat_rad * 180.0 / M_PI;
   double min_lat = min_lat_rad * 180.0 / M_PI;
-
-  // Log tile bounds for debugging
-  LOG_INFO("MVT DEBUG: Tile bounds z=" + std::to_string(z) + " x=" + std::to_string(x) + " y=" + std::to_string(y) +
-           " -> lon[" + std::to_string(min_lon) + "," + std::to_string(max_lon) + "] lat[" + std::to_string(min_lat) + "," + std::to_string(max_lat) + "]");
 
   return valhalla::midgard::AABB2<valhalla::midgard::PointLL>(
     valhalla::midgard::PointLL(min_lon, min_lat),
@@ -367,7 +362,6 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
 
         // Determine which Valhalla tile levels to include based on zoom level
         std::vector<uint8_t> allowed_tile_levels;
-        LOG_INFO("MVT DEBUG: Config pointer: " + std::to_string(reinterpret_cast<uintptr_t>(config)));
         if (config) {
           // Use configuration-based filtering
           uint32_t tile_0_min_zoom = config->get("map_tile.valhalla_tile_0_min_zoom", 5);
@@ -382,7 +376,6 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
         auto edge_ids = loki::edges_in_bbox(bbox, *graph_reader);
 
         uint32_t roads_found = 0;
-        uint32_t edges_processed = 0;
 
         // Process only the edges that intersect with our bounding box
         for (const auto& edge_id : edge_ids) {
@@ -403,15 +396,22 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
           const auto* edge = tile->directededge(edge_id);
           if (!edge) continue;
 
-          // Get the opposing edge (backward direction)
+
+          // Grab the slower of the two edges (important for closures)
           // TODO: Use offset to render opposing edges
           graph_tile_ptr opp_tile = nullptr;
           const auto* opp_edge = graph_reader->GetOpposingEdge(edge_id, opp_tile);
 
+          // Get the timezone for 'current' historic time
+          int timezoneIndex = graph_reader->GetTimezoneFromEdge(edge_id, tile);
+          if (timezoneIndex == 0) { // timezone data is only stored on used edges
+            baldr::GraphId opp_edge_id = graph_reader->GetOpposingEdgeId(edge_id, opp_edge, opp_tile);
+            timezoneIndex = graph_reader->GetTimezoneFromEdge(opp_edge_id, opp_tile);
+          }
+
           if (opp_edge && opp_tile) {
 
               try {
-
               uint8_t flow_sources_forward = 0;
               uint32_t current_speed_forward = GetLiveSpeed(tile, edge, valhalla::baldr::kCurrentFlowMask, 0, false, &flow_sources_forward);
 
@@ -423,6 +423,13 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
                 tile = opp_tile;
               }
 
+              // If we don't have live traffic data just try to use a valid edge. Only valid edges are tagged with a tz
+              if (!(flow_sources_opp & valhalla::baldr::kCurrentFlowMask) && !(flow_sources_forward & valhalla::baldr::kCurrentFlowMask)) {
+                if (!(edge->free_flow_speed() > 0)) {
+                  edge = opp_edge;
+                  tile = opp_tile;
+                }
+              }
             } catch (const std::exception& e) {
               LOG_ERROR("MVT DEBUG: Could not get traffic data for edge: " + std::string(e.what()));
             }
@@ -532,7 +539,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
 
           // Add basic road properties
           road.add_property("classification", std::to_string(static_cast<int>(edge->classification())));
-          // road.add_property("id", static_cast<int64_t>(edge_id.value));
+          road.add_property("id", static_cast<int64_t>(edge_id.value));
           road.add_property("is_shortcut", edge->is_shortcut());
 
           // Add access restrictions (height, width, length, weight only)
@@ -573,12 +580,11 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
               uint64_t seconds_of_week = baldr::kInvalidSecondsOfWeek;
               uint64_t seconds_from_now = 0;
 
-              // Check if a specific time was requested
               if (api.options().has_date_time_case()) {
                 // Parse the requested time and convert to seconds of week for historic traffic
                 try {
                   std::string date_time = api.options().date_time();
-                  auto time_info = valhalla::baldr::TimeInfo::make(date_time, 0, nullptr);
+                  auto time_info = valhalla::baldr::TimeInfo::make(date_time, timezoneIndex, nullptr);
                   if (time_info.valid) {
                     seconds_of_week = time_info.second_of_week;
                     seconds_from_now = time_info.negative_seconds_from_now ?
@@ -591,25 +597,19 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
                 }
               }
 
-              // Get both current and historic traffic speeds
+              // mask to indicate whether we have current or historic data
               uint8_t current_flow_sources = 0;
               uint8_t historic_flow_sources = 0;
 
               // Always get current traffic speed (use current flow mask to get live traffic data)
               uint32_t current_speed = GetLiveSpeed(tile, edge, valhalla::baldr::kCurrentFlowMask, 0, false, &current_flow_sources);
 
-
-
-              // Get historic traffic speed if time parameter is specified
               uint32_t historic_speed = 0;
               bool has_historic_data = false;
-              if (api.options().has_date_time_case()) {
-                historic_speed = tile->GetSpeed(edge, valhalla::baldr::kPredictedFlowMask, seconds_of_week, false, &historic_flow_sources, seconds_from_now);
-                has_historic_data = (historic_flow_sources & valhalla::baldr::kPredictedFlowMask);
-              }
+              historic_speed = tile->GetSpeed(edge, valhalla::baldr::kPredictedFlowMask, seconds_of_week, false, &historic_flow_sources, seconds_from_now);
+              has_historic_data = (historic_flow_sources & valhalla::baldr::kPredictedFlowMask);
 
-              // Determine which speed to use as the primary "traffic_speed" property
-              uint32_t primary_speed;
+              uint32_t primary_speed; // used to determine the color of the road
 
               // If time parameter is specified, use historic speed (with free flow fallback)
               if (api.options().has_date_time_case()) {
@@ -617,19 +617,29 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
               } else {
                 // If no time parameter, use current (live) speed
                 bool has_current_data = (current_flow_sources & valhalla::baldr::kCurrentFlowMask);
-                primary_speed = has_current_data ? current_speed : edge->free_flow_speed();
+
+                std::string date_time = "current";
+                auto time_info = valhalla::baldr::TimeInfo::make(date_time, timezoneIndex, nullptr);
+
+                historic_speed = tile->GetSpeed(edge,
+                  valhalla::baldr::kPredictedFlowMask,
+                  time_info.second_of_week,
+                  false,
+                  &historic_flow_sources,
+                  0
+                );
+                has_historic_data = (historic_flow_sources & valhalla::baldr::kPredictedFlowMask);
+
+                primary_speed = has_current_data ? current_speed : historic_speed;
               }
 
-
-              // Always add current speed (with free flow fallback if no current data)
               bool has_current_data = (current_flow_sources & valhalla::baldr::kCurrentFlowMask);
-              uint32_t current_speed_final = has_current_data ? current_speed : edge->free_flow_speed();
-              road.add_property("current_speed", static_cast<int64_t>(current_speed_final));
+              if (has_current_data) {
+                road.add_property("current_speed", static_cast<int64_t>(current_speed));
+              }
 
-              // Add historic speed if time parameter was specified
-              if (api.options().has_date_time_case()) {
-                uint32_t historic_speed_final = has_historic_data ? historic_speed : edge->free_flow_speed();
-                road.add_property("historic_speed", static_cast<int64_t>(historic_speed_final));
+              if (has_historic_data) {
+                road.add_property("historic_speed", static_cast<int64_t>(historic_speed));
               }
 
               // Calculate speed bucket based on traffic vs free flow speed
@@ -651,6 +661,8 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
 
                 road.add_property("speed_bucket", speed_bucket);
                 road.add_property("speed_ratio", static_cast<double>(speed_ratio));
+
+                road.commit(); // Only commit the road if it has free_flow_speed
               }
             } catch (const std::exception& e) {
               // Traffic data might not be available for this edge, continue without it
@@ -658,9 +670,7 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             }
           }
 
-          road.commit();
           roads_found++;
-          edges_processed++;
 
           // Limit the number of roads to avoid overwhelming the tile
           if (roads_found >= 1000000) {
@@ -668,9 +678,6 @@ std::string MvtSerializer::generateMvtProtobuf(uint32_t z, uint32_t x, uint32_t 
             break;
           }
         }
-
-        LOG_INFO("MVT DEBUG: Processed " + std::to_string(edges_processed) + " edges, found " + std::to_string(roads_found) + " roads");
-
       } catch (const std::exception& e) {
         LOG_ERROR("MVT DEBUG: Error reading Valhalla graph data: " + std::string(e.what()));
         // Re-throw the exception to let the caller handle it
