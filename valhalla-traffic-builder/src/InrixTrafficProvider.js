@@ -18,8 +18,10 @@ Sentry.init({
 });
 
 dotenv.config();
-const INRIX_APP_ID = process.env.INRIX_APP_ID;
-const INRIX_HASH_TOKEN = process.env.INRIX_HASH_TOKEN;
+// const INRIX_APP_ID = process.env.INRIX_APP_ID;
+const INRIX_APP_ID = '8446144a-6098-48f4-8d4f-10814a26e261';
+const INRIX_HASH_TOKEN = '6e8e09608c69efa823985f903b91a8383d5ea07a';
+// const INRIX_HASH_TOKEN = process.env.INRIX_HASH_TOKEN;
 if (!INRIX_APP_ID || !INRIX_HASH_TOKEN) {
   throw new Error('Inrix App Id or Inrix Hash Token not set! Make sure to add it to .env file');
 }
