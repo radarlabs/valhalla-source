@@ -51,7 +51,7 @@ class InrixTrafficProvider {
   }
 
   static async makeRequests(batch, token) {
-    const baseUrl = 'https://segment-api.inrix.com/v1/segments/speed';
+    const baseUrl = 'https://segment-api.beta.inrix.com/v1/segments/speed';
 
     const requests = batch.map(quadkey => {
       const url = `${baseUrl}?quadkey=${quadkey}&Coverage=8&SpeedOutputFields=all&units=1&FRCLevel=1,2,3,4,5&accesstoken=${token}`;
