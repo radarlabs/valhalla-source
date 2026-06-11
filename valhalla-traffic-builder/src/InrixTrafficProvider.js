@@ -103,8 +103,7 @@ class InrixTrafficProvider {
 
     const segmentsStatement = await segmentsToWaysDb.prepare('SELECT * FROM segments WHERE seg_id = ?');
 
-
-    const res = await axios.get(`https://uas-api.inrix.com/v1/appToken?appId=${INRIX_APP_ID}&hashToken=${INRIX_HASH_TOKEN}`);
+    const res = await axios.get(`https://uas-api.beta.inrix.com/v1/appToken?appId=${INRIX_APP_ID}&hashToken=${INRIX_HASH_TOKEN}`);
     const inrixAppToken = res?.data?.result?.token
 
     const data = await this.makeRequests(batch, inrixAppToken);
