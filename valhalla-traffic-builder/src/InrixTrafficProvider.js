@@ -141,9 +141,9 @@ class InrixTrafficProvider {
       //   speed = speed * 0.75;
       // } else
       if (segment.reference < 30 && speed / segment.reference < 0.75) { // Apply higher cost to traffic set in downtowns (where segment.reference is very slow)
-        speed = speed * 0.65;
+        speed = speed * 0.8;
       } else if (segment.reference < 30) { // Inrix tends to overestimate speed in downtowns
-        speed = speed * 0.85;
+        // speed = speed * 0.9;
       }
 
       if (segment.segmentClosed) {
