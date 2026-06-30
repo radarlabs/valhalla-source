@@ -134,11 +134,16 @@ class InrixTrafficProvider {
 
       // Inrix Speed Adjustments
       // Reference speed is freeflow speed at that datetime
+
+      /* Deprecated due to Inrix changes (not needed anymore) 2026-06-29
       if (speed / segment.reference <= 0.25) { // Inrix really tends to underestimate heavy heavy traffic. It knows where the traffic jams are, but doesn't make them cost enough 10km/h -> 6km/h
         speed = speed * 0.6;
       } else if (speed / segment.reference <= 0.4) { // Lighter version of above rule
         speed = speed * 0.75;
-      } else if (segment.reference < 30 && speed / segment.reference < 0.75) { // Apply higher cost to traffic set in downtowns (where segment.reference is very slow)
+      } */
+
+
+      if (segment.reference < 30 && speed / segment.reference < 0.75) { // Apply higher cost to traffic set in downtowns (where segment.reference is very slow)
         speed = speed * 0.65;
       } else if (segment.reference < 30) { // Inrix tends to overestimate speed in downtowns
         speed = speed * 0.85;
