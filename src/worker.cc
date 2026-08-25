@@ -18,8 +18,10 @@
 #include <cpp-statsd-client/StatsdClient.hpp>
 
 #include <sstream>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
+#include <vector>
 
 using namespace valhalla;
 #ifdef ENABLE_SERVICES
@@ -1478,6 +1480,7 @@ bool check_hierarchy_limits(std::vector<HierarchyLimits>& hierarchy_limits,
 
 #ifdef ENABLE_SERVICES
 void ParseApi(const http_request_t& request, valhalla::Api& api) {
+  LOG_INFO("PARSEAPI DEBUG: ParseApi called with path: '" + request.path + "'");
   // block all but get and post
   if (request.method != method_t::POST && request.method != method_t::GET) {
     throw valhalla_exception_t{101};
@@ -1489,7 +1492,89 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
 
   // get the action
   Options::Action action = static_cast<Options::Action>(Options::Action_ARRAYSIZE);
-  if (!request.path.empty())
+
+  // Declare tile_id at function level so it can be used later
+  std::string tile_id = "";
+
+        // Simple /tile endpoint that just returns basic info
+  LOG_INFO("TILE DEBUG: Checking path: " + request.path);
+  LOG_INFO("TILE DEBUG: request.path == \"/tile\": " + std::to_string(request.path == "/tile"));
+  LOG_INFO("TILE DEBUG: request.path.find(\"/tile/\") == 0: " + std::to_string(request.path.find("/tile/") == 0));
+
+  if (request.path == "/tile" || request.path.find("/tile/") == 0) {
+    // Only allow GET requests for tile endpoints
+    if (request.method != method_t::GET) {
+      throw valhalla_exception_t{101, "Tile endpoint only supports GET requests"};
+    }
+
+    LOG_INFO("TILE DEBUG: Inside tile handling block");
+    LOG_INFO("TILE DEBUG: Parsed coordinates: request.path=" + request.path);
+
+    // Create a custom response by setting up the API
+    LOG_INFO("TILE DEBUG: Setting action to Options::tile");
+    action = Options::tile;  // Use tile action to trigger MVT generation
+    LOG_INFO("TILE DEBUG: Setting format to Options_Format_mvt");
+    api.mutable_options()->set_action(action);
+    api.mutable_options()->set_format(Options_Format_mvt);  // Set MVT format
+
+    // Parse z/x/y coordinates if they exist
+    tile_id = "tile_endpoint_active";
+    if (request.path.find("/tile/") == 0) {
+      std::string path = request.path.substr(6); // Remove "/tile/"
+      std::vector<std::string> parts;
+      std::stringstream ss(path);
+      std::string part;
+
+      while (std::getline(ss, part, '/')) {
+        parts.push_back(part);
+      }
+
+      if (parts.size() == 3) {
+        // Remove .mvt extension from y coordinate if present
+        std::string y_str = parts[2];
+        if (y_str.length() >= 4 && y_str.substr(y_str.length() - 4) == ".mvt") {
+          y_str = y_str.substr(0, y_str.length() - 4);
+        }
+
+                try {
+          uint32_t z = std::stoul(parts[0]);
+          uint32_t x = std::stoul(parts[1]);
+          uint32_t y = std::stoul(y_str);
+
+          LOG_INFO("TILE DEBUG: Parsed coordinates: z=" + std::to_string(z) + ", x=" + std::to_string(x) + ", y=" + std::to_string(y));
+
+          // Store coordinates in the API for the MVT serializer to use
+          // We'll use the id field to encode z/x/y coordinates
+          tile_id = std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y);
+
+          // Also store the coordinates in custom fields if available
+          // (This is where you could add custom protobuf fields for tile data)
+        } catch (const std::exception& e) {
+          // If parsing fails, just use a generic tile identifier
+          tile_id = "tile_invalid_coordinates";
+        }
+      } else {
+        tile_id = "tile_invalid_format";
+      }
+    }
+
+        // Set the tile ID in the API options (contains z/x/y coordinates)
+    api.mutable_options()->set_id(tile_id);
+
+    // Extract time parameter from query parameters for tile requests
+    auto time_param = request.query.find("time");
+    if (time_param != request.query.end() && !time_param->second.empty()) {
+      std::string time_value = time_param->second.front();
+      LOG_INFO("TILE DEBUG: Setting time parameter: " + time_value);
+      api.mutable_options()->set_date_time(time_value);
+      api.mutable_options()->set_date_time_type(Options_DateTimeType_depart_at);
+    }
+
+    // Don't return early - let the request continue through the pipeline
+    // so it reaches the actor_t::act function where MVT serialization happens
+  }
+
+  if (!request.path.empty() && action == static_cast<Options::Action>(Options::Action_ARRAYSIZE))
     Options_Action_Enum_Parse(request.path.substr(1), &action);
 
   // if its a protobuf mime go with that
@@ -1531,6 +1616,8 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
       continue;
     }
 
+    LOG_INFO("PARSEAPI DEBUG: Adding query param to JSON: " + kv.first + " = " + kv.second.front());
+
     // turn single value entries into single key value
     if (kv.second.size() == 1) {
       document.AddMember({kv.first, allocator}, {kv.second.front(), allocator}, allocator);
@@ -1547,6 +1634,36 @@ void ParseApi(const http_request_t& request, valhalla::Api& api) {
 
   // parse out the options
   from_json(document, action, api);
+
+  // Ensure the action is set in the api options
+  if (action != static_cast<Options::Action>(Options::Action_ARRAYSIZE)) {
+    api.mutable_options()->set_action(action);
+  }
+
+  // For tile requests, preserve the tile coordinates and time parameter that were set earlier
+  if (action == Options::tile) {
+    // Restore tile coordinates if they were set in the tile handling block
+    if (!tile_id.empty() && tile_id != "tile_endpoint_active") {
+      api.mutable_options()->set_id(tile_id);
+      LOG_INFO("PARSEAPI DEBUG: Restored tile coordinates: " + tile_id);
+    }
+
+    // Restore time parameter if it was set in the tile handling block
+    auto time_param = request.query.find("time");
+    if (time_param != request.query.end() && !time_param->second.empty()) {
+      std::string time_value = time_param->second.front();
+      api.mutable_options()->set_date_time(time_value);
+      api.mutable_options()->set_date_time_type(Options_DateTimeType_depart_at);
+      LOG_INFO("PARSEAPI DEBUG: Restored time parameter: " + time_value);
+    }
+  }
+
+  // Debug: Check if time parameter was set
+  if (api.options().has_date_time_case()) {
+    LOG_INFO("PARSEAPI DEBUG: Time parameter set in API options: " + api.options().date_time());
+  } else {
+    LOG_INFO("PARSEAPI DEBUG: No time parameter in API options");
+  }
 }
 
 const headers_t::value_type CORS{"Access-Control-Allow-Origin", "*"};

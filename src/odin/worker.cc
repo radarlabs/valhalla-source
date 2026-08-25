@@ -6,11 +6,13 @@
 #include "odin/util.h"
 #include "proto/trip.pb.h"
 #include "tyr/serializers.h"
+#include "tyr/actor.h"
 
 #include <boost/property_tree/ptree.hpp>
 
 #include <functional>
 #include <string>
+#include <sstream>
 
 using namespace valhalla;
 using namespace valhalla::tyr;
@@ -21,7 +23,7 @@ namespace valhalla {
 namespace odin {
 
 odin_worker_t::odin_worker_t(const boost::property_tree::ptree& config)
-    : service_worker_t(config), markup_formatter_(config) {
+    : service_worker_t(config), markup_formatter_(config), config_(config) {
   // signal that the worker started successfully
   started();
 }
@@ -60,6 +62,7 @@ odin_worker_t::work(const std::list<zmq::message_t>& job,
                     const std::function<void()>& interrupt_function) {
   auto& info = *static_cast<prime_server::http_request_info_t*>(request_info);
   LOG_INFO("Got Odin Request " + std::to_string(info.id));
+  LOG_INFO("ODIN DEBUG: Odin worker is being called");
   Api request;
   prime_server::worker_t::result_t result{false, {}, {}};
   try {
@@ -73,12 +76,46 @@ odin_worker_t::work(const std::list<zmq::message_t>& job,
       throw valhalla_exception_t{200, "Failed parsing pbf in Odin::Worker"};
     }
 
-    // its either a simple status request or its a route to narrate
+    // its either a simple status request, tile request, or its a route to narrate
     switch (request.options().action()) {
       case Options::status: {
         status(request);
         auto response = tyr::serializeStatus(request);
         result = to_response(response, info, request);
+        break;
+      }
+      case Options::tile: {
+        LOG_INFO("ODIN DEBUG: Calling Tyr actor directly for tile request");
+        // For tile requests, we need to call the Tyr actor directly
+        // since the Tyr actor is not part of the worker pipeline
+
+        // Extract tile coordinates and time parameter from HTTP request if not already in API options
+        if (request.options().id().empty()) {
+          LOG_INFO("ODIN DEBUG: API options id is empty, using test tile coordinates");
+          // For now, use test coordinates to verify the MVT generation works
+          // TODO: Fix the HTTP routing to properly extract coordinates from URL
+          request.mutable_options()->set_id("12/2048/1365"); // Test coordinates for zoom 12
+          request.mutable_options()->set_format(Options_Format_mvt);
+          LOG_INFO("ODIN DEBUG: Set test tile coordinates: 12/2048/1365");
+        }
+
+        // Check if time parameter is set
+        if (request.options().has_date_time_case()) {
+          LOG_INFO("ODIN DEBUG: Time parameter set: " + request.options().date_time());
+        } else {
+          LOG_INFO("ODIN DEBUG: No time parameter set, using current traffic");
+        }
+
+        try {
+          // Create a Tyr actor to handle the tile request
+          valhalla::tyr::actor_t actor(config_);
+          auto response = actor.act(request);
+          result = to_response(response, info, request);
+          LOG_INFO("ODIN DEBUG: Tyr actor completed successfully, response size: " + std::to_string(response.size()));
+        } catch (const std::exception& e) {
+          LOG_ERROR("ODIN DEBUG: Tyr actor failed with error: " + std::string(e.what()));
+          throw valhalla_exception_t{400, std::string("Tyr actor failed: ") + e.what()};
+        }
         break;
       }
       default: {

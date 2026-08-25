@@ -37,6 +37,7 @@ private:
   std::string service_name() const override {
     return "odin";
   }
+  boost::property_tree::ptree config_;
 };
 } // namespace odin
 } // namespace valhalla
