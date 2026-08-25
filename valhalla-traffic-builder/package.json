@@ -10,13 +10,13 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@sentry/node": "^9.37.0",
+    "@sentry/node": "^10.70.0",
     "axios": "^1.19.0",
     "dotenv": "^16.5.0",
     "node-addon-api": "^8.3.1",
     "protobufjs": "^7.5.0",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
+    "sqlite3": "^6.0.1",
     "undici": "^7.8.0"
   }
 }
