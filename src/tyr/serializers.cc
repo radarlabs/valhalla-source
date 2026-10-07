@@ -1,4 +1,5 @@
 #include "tyr/serializers.h"
+#include "tyr/mvt_serializer.h"
 #include "baldr/datetime.h"
 #include "baldr/json.h"
 #include "baldr/openlr.h"
@@ -283,6 +284,12 @@ void geojson_shape(const std::vector<midgard::PointLL>& shape, rapidjson::writer
   writer.set_precision(kDefaultPrecision);
   writer.end_array();
 }
+
+std::string serializeMvt(Api& request, const std::shared_ptr<baldr::GraphReader>& reader, const boost::property_tree::ptree* config) {
+  // Use the MVT serializer to convert the API data
+  return MvtSerializer::serialize(request, request.options().format(), reader, config);
+}
+
 } // namespace tyr
 } // namespace valhalla
 

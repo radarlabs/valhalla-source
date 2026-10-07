@@ -183,6 +183,14 @@ thor_worker_t::work(const std::list<zmq::message_t>& job,
         result.messages.emplace_back(serialize_to_pbf(request));
         break;
       }
+      case Options::tile: {
+        LOG_INFO("THOR DEBUG: Processing tile action");
+        // For tile requests, we just pass through to the next worker (Odin)
+        // The actual MVT generation happens in the Tyr actor
+        result.messages.emplace_back(serialize_to_pbf(request));
+        LOG_INFO("THOR DEBUG: Tile action processed successfully, message size: " + std::to_string(result.messages.back().size()));
+        break;
+      }
       default:
         throw valhalla_exception_t{400}; // this should never happen
     }

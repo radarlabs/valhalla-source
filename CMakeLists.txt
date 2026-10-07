@@ -128,6 +128,11 @@ set(rapidjson_include_dir ${VALHALLA_SOURCE_DIR}/third_party/rapidjson/include)
 set(unordered_dense_include_dir ${VALHALLA_SOURCE_DIR}/third_party/unordered_dense/include)
 set(cxxopts_include_dir ${VALHALLA_SOURCE_DIR}/third_party/cxxopts/include)
 set(dirent_include_dir ${VALHALLA_SOURCE_DIR}/third_party/dirent/include)
+set(vtzero_include_dir ${VALHALLA_SOURCE_DIR}/third_party/vtzero/include)
+set(protozero_include_dir ${VALHALLA_SOURCE_DIR}/third_party/protozero/include)
+
+# Override protozero path for vtzero
+set(PROTOZERO_INCLUDE_DIR ${VALHALLA_SOURCE_DIR}/third_party/protozero/include)
 if (PREFER_EXTERNAL_DEPS)
   # date
   find_package(date QUIET)

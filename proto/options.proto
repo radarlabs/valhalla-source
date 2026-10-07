@@ -80,7 +80,7 @@ message AvoidEdge {
 message HierarchyLimits {
  uint32 up_transition_count = 1;   // Keep track of # of upward transitions
                                    // Internal use only, remember to clear on incoming requests
- uint32 max_up_transitions = 2;    // Maximum number of upward transitions before 
+ uint32 max_up_transitions = 2;    // Maximum number of upward transitions before
                                    // expansion is stopped on a level.
  float expand_within_dist = 3; // Distance (m) to destination within which
                                    // expansion of a hierarchy level is
@@ -372,6 +372,7 @@ message Options {
     osrm = 2;
     pbf = 3;
     geotiff = 4;
+    mvt = 5;
   }
 
   enum Action {
@@ -388,6 +389,7 @@ message Options {
     expansion = 10;
     centroid = 11;
     status = 12;
+    tile = 13;
   }
 
   enum DateTimeType {

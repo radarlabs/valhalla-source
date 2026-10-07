@@ -98,6 +98,18 @@ std::string serializeTraceAttributes(
 /**
  * Turn proto with status information into json
  * @param request  the proto request with status info attached
+ */
+
+/**
+ * Turns the pbf into MVT (Mapbox Vector Tiles) format
+ * @param request  the proto request with routing data
+ * @return MVT data as a string
+ */
+std::string serializeMvt(Api& request, const std::shared_ptr<baldr::GraphReader>& reader, const boost::property_tree::ptree* config = nullptr);
+
+/**
+ * Turns the pbf into a status response
+ * @param request  the proto request with status data
  * @return json string
  */
 std::string serializeStatus(Api& request);

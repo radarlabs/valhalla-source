@@ -4,6 +4,7 @@
 #include "odin/worker.h"
 #include "thor/worker.h"
 #include "tyr/serializers.h"
+#include "tyr/mvt_serializer.h"
 
 using namespace valhalla;
 using namespace valhalla::loki;
@@ -15,11 +16,11 @@ namespace tyr {
 
 struct actor_t::pimpl_t {
   pimpl_t(const boost::property_tree::ptree& config)
-      : reader(new baldr::GraphReader(config.get_child("mjolnir"))), loki_worker(config, reader),
+      : config(config), reader(new baldr::GraphReader(config.get_child("mjolnir"))), loki_worker(config, reader),
         thor_worker(config, reader), odin_worker(config) {
   }
   pimpl_t(const boost::property_tree::ptree& config, baldr::GraphReader& graph_reader)
-      : reader(&graph_reader, [](baldr::GraphReader*) {}), loki_worker(config, reader),
+      : config(config), reader(&graph_reader, [](baldr::GraphReader*) {}), loki_worker(config, reader),
         thor_worker(config, reader), odin_worker(config) {
   }
   void set_interrupts(const std::function<void()>* interrupt_function) {
@@ -32,6 +33,7 @@ struct actor_t::pimpl_t {
     thor_worker.cleanup();
     odin_worker.cleanup();
   }
+  boost::property_tree::ptree config;
   std::shared_ptr<baldr::GraphReader> reader;
   loki::loki_worker_t loki_worker;
   thor::thor_worker_t thor_worker;
@@ -80,6 +82,17 @@ std::string actor_t::act(Api& api, const std::function<void()>* interrupt) {
       return centroid("", interrupt, &api);
     case Options::status:
       return status("", interrupt, &api);
+      case Options::tile:
+        LOG_INFO("ACTOR DEBUG: Handling tile action");
+        LOG_INFO("ACTOR DEBUG: About to call tile function");
+        try {
+          auto response = tile("", interrupt, &api);
+          LOG_INFO("ACTOR DEBUG: tile function completed successfully, response size: " + std::to_string(response.size()));
+          return response;
+        } catch (const std::exception& e) {
+          LOG_ERROR("ACTOR DEBUG: tile function failed with error: " + std::string(e.what()));
+          throw;
+        }
     default:
       throw valhalla_exception_t{106};
   }
@@ -363,6 +376,116 @@ actor_t::status(const std::string& request_str, const std::function<void()>* int
     cleanup();
   }
   return json;
+}
+
+std::string
+actor_t::tile(const std::string& request_str, const std::function<void()>* interrupt, Api* api) {
+  // set the interrupts
+  pimpl->set_interrupts(interrupt);
+  // if the caller doesn't want a copy we'll use this dummy
+  Api dummy;
+  if (!api) {
+    api = &dummy;
+  }
+  // parse the request
+  LOG_INFO("ACTOR DEBUG: request_str: '" + request_str + "'");
+  ParseApi(request_str, Options::tile, *api);
+
+  // Check if we have tile coordinates in the id field (from HTTP route parsing)
+  LOG_INFO("ACTOR DEBUG: API options id: '" + api->options().id() + "'");
+  if (!api->options().id().empty()) {
+    std::string tile_id = api->options().id();
+    LOG_INFO("ACTOR DEBUG: Processing tile_id: '" + tile_id + "'");
+
+    // Parse z/x/y from the id field (format: "z/x/y")
+    std::vector<std::string> parts;
+    std::stringstream ss(tile_id);
+    std::string part;
+    while (std::getline(ss, part, '/')) {
+      parts.push_back(part);
+    }
+
+    if (parts.size() == 3) {
+      try {
+        uint32_t z = std::stoul(parts[0]);
+        uint32_t x = std::stoul(parts[1]);
+        uint32_t y = std::stoul(parts[2]);
+
+        // Use the tile_xyz function for proper tile generation
+        auto mvt_data = tile_xyz(z, x, y, interrupt, api);
+        return mvt_data;
+
+      } catch (const std::exception& e) {
+        throw valhalla_exception_t{400, "Invalid tile coordinates: " + tile_id};
+      }
+    }
+  }
+
+  // Fallback: Check if we have locations to define the bounding box (for testing)
+  if (api->options().locations_size() >= 2) {
+    // For now, use locations to create a bounding box
+    // But this should be replaced with proper tile coordinate handling
+    auto point1 = api->options().locations(0).ll();
+    auto point2 = api->options().locations(1).ll();
+
+    // Create bounding box with min/max coordinates
+    double min_lat = std::min(point1.lat(), point2.lat());
+    double max_lat = std::max(point1.lat(), point2.lat());
+    double min_lng = std::min(point1.lng(), point2.lng());
+    double max_lng = std::max(point1.lng(), point2.lng());
+
+    auto bbox = midgard::AABB2<midgard::PointLL>(min_lng, min_lat, max_lng, max_lat);
+
+    // Default zoom level
+    uint32_t z = 14;
+
+    // Generate MVT tile using proper tile coordinates
+    auto mvt_data = tile_xyz(z, 0, 0, interrupt, api);
+
+    // if they want you do to do the cleanup automatically
+    if (auto_cleanup) {
+      cleanup();
+    }
+
+    return mvt_data;
+  } else {
+    // Return error if no tile coordinates provided
+    throw valhalla_exception_t{107, "Tile request requires tile coordinates (z/x/y) or bounding box locations"};
+  }
+}
+
+std::string
+actor_t::tile_xyz(uint32_t z, uint32_t x, uint32_t y, const std::function<void()>* interrupt, Api* api) {
+  // set the interrupts
+  pimpl->set_interrupts(interrupt);
+
+  // Convert tile coordinates (z/x/y) to bounding box
+  // This follows the standard Web Mercator tile calculation
+  double n = std::pow(2.0, z);
+  double west = x / n * 360.0 - 180.0;
+  double east = (x + 1) / n * 360.0 - 180.0;
+  double north = std::atan(std::sinh(M_PI * (1 - 2 * y / n))) * 180.0 / M_PI;
+  double south = std::atan(std::sinh(M_PI * (1 - 2 * (y + 1) / n))) * 180.0 / M_PI;
+
+  // Create bounding box from tile coordinates
+  midgard::PointLL sw(south, west);
+  midgard::PointLL ne(north, east);
+  auto bbox = midgard::AABB2<midgard::PointLL>(west, south, east, north);
+
+  // Generate MVT tile using proper MVT serializer
+  // Use the existing API object that was already parsed and configured
+  api->mutable_options()->set_format(Options_Format_mvt);
+  api->mutable_options()->set_id(std::to_string(z) + "/" + std::to_string(x) + "/" + std::to_string(y));
+
+  LOG_INFO("ACTOR DEBUG: About to call serializeMvt with config pointer: " + std::to_string(reinterpret_cast<uintptr_t>(&pimpl->config)));
+  auto mvt_data = tyr::serializeMvt(*api, pimpl->reader, &pimpl->config);
+
+  // if they want you do to do the cleanup automatically
+  if (auto_cleanup) {
+    cleanup();
+  }
+
+  return mvt_data;
 }
 
 } // namespace tyr

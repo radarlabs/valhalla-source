@@ -124,6 +124,7 @@ bool Options_Action_Enum_Parse(const std::string& action, Options::Action* a) {
       {"expansion", Options::expansion},
       {"centroid", Options::centroid},
       {"status", Options::status},
+      {"tile", Options::tile}
   };
   auto i = actions.find(action);
   if (i == actions.cend())
@@ -136,7 +137,7 @@ bool Options_ExpansionAction_Enum_Parse(const std::string& action, Options::Acti
   static const std::unordered_map<std::string, Options::Action>
       actions{{"route", Options::route},
               {"isochrone", Options::isochrone},
-              {"sources_to_targets", Options::sources_to_targets}};
+              {"sources_to_targets", Options::sources_to_targets}, {"tile", Options::tile}};
   auto i = actions.find(action);
   if (i == actions.cend())
     return false;
@@ -158,6 +159,7 @@ const std::string& Options_Action_Enum_Name(const Options::Action action) {
       {Options::expansion, "expansion"},
       {Options::centroid, "centroid"},
       {Options::status, "status"},
+      {Options::tile, "tile"},
   };
   auto i = actions.find(action);
   return i == actions.cend() ? empty_str : i->second;

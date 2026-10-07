@@ -9,7 +9,8 @@ set(sources
   route_summary_cache.cc
   serializers.cc
   transit_available_serializer.cc
-  expansion_serializer.cc)
+  expansion_serializer.cc
+  mvt_serializer.cc)
 
 set(sources_with_warnings
   locate_serializer.cc
@@ -19,7 +20,9 @@ set(sources_with_warnings
 
 set(system_includes
   ${date_include_dir}
-  $<$<BOOL:${WIN32}>:${dirent_include_dir}>)
+  $<$<BOOL:${WIN32}>:${dirent_include_dir}>
+  ${VALHALLA_SOURCE_DIR}/third_party/vtzero/include
+  ${VALHALLA_SOURCE_DIR}/third_party/protozero/include)
 
 valhalla_module(NAME tyr
   SOURCES
@@ -39,6 +42,8 @@ valhalla_module(NAME tyr
       ${system_includes}
     PRIVATE
       ${rapidjson_include_dir}
+      ${vtzero_include_dir}
+      ${VALHALLA_SOURCE_DIR}/third_party/protozero/include
   DEPENDS
     valhalla::loki
     valhalla::thor

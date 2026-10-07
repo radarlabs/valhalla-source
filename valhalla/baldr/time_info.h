@@ -114,7 +114,7 @@ struct TimeInfo {
       if (!dt::get_tz_db().from_index(default_timezone_index)) {
         default_timezone_index = baldr::DateTime::get_tz_db().to_index("Etc/UTC");
       }
-      LOG_WARN("No timezone for location using default");
+      // LOG_WARN("No timezone for location using default");
       timezone_index = default_timezone_index;
     }
     const auto* tz = dt::get_tz_db().from_index(timezone_index);
