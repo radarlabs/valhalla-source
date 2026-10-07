@@ -128,6 +128,9 @@ This downloads traffic data from Inrix and packages it up to a traffic.tar and u
 
 See [Valhalla Traffic Worker](./valhalla-traffic-builder/README.md)
 
+Install the traffic builder with `npm ci` from `valhalla-traffic-builder` to use the patched dependency versions in the lockfile.
+Its `package.json` allows install scripts only for the pinned SQLite and protobuf packages; review those entries when updating either package so npm 12 can install the required native bindings.
+
 **Compiling NAPI**
 If you want to modify and test the NAPI code you will also need node js and NAPI. This N-API code is used by Valhalla Traffic worker to add traffic data to the traffic.tar
 
@@ -292,4 +295,3 @@ Radar extends Valhalla source code in three main ways for live traffic.
 ## Debugging
 If there is still variance compare the local valhalla.json with
 https://github.com/radarlabs/infrastructure/blob/main/deploy/services/valhalla/configmap.yaml
-
