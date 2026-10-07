@@ -64,6 +64,8 @@ BidirectionalAStar::BidirectionalAStar(const boost::property_tree::ptree& config
   pruning_disabled_at_origin_ = false;
   pruning_disabled_at_destination_ = false;
   ignore_hierarchy_limits_ = false;
+  total_estimated_time_ = 0.0f;
+  date_time_type_ = Options::no_time;
 }
 
 // Destructor
@@ -97,6 +99,8 @@ void BidirectionalAStar::Clear() {
   pruning_disabled_at_origin_ = false;
   pruning_disabled_at_destination_ = false;
   ignore_hierarchy_limits_ = false;
+  total_estimated_time_ = 0.0f;
+  date_time_type_ = Options::no_time;
 }
 
 // Initialize the A* heuristic and adjacency lists for both the forward
@@ -396,8 +400,47 @@ void BidirectionalAStar::Expand(baldr::GraphReader& graphreader,
   // Keep track of superseded edges
   uint32_t shortcuts = 0;
 
-  // Update the time information even if time is invariant to account for timezones
-  auto seconds_offset = invariant ? 0.f : pred.cost().secs;
+                  // MODIFIED: Calculate time-aware seconds_from_now for bidirectional A*
+  constexpr bool FORWARD = expansion_direction == ExpansionType::forward;
+  float seconds_offset = 0.f;
+
+  // Handle all time scenarios: no time, current time, depart_at, arrive_by
+  if (date_time_type_ == Options::arrive_by) {
+    // ARRIVE_BY: User provided arrival time, we need to work backwards
+    if (FORWARD) {
+      // Forward search: Estimate departure time and add cumulative travel time
+      // departure_time = arrival_time - estimated_total_time
+      float estimated_departure_time = total_estimated_time_;
+      seconds_offset = estimated_departure_time + pred.cost().secs;
+    } else {
+      // Reverse search: Work backwards from arrival time
+      // The TimeInfo object has the arrival time, subtract cumulative travel time
+      seconds_offset = pred.cost().secs;
+    }
+  } else {
+    // All other cases: no time, current time, depart_at
+    if (FORWARD) {
+      // Forward search: Always use cumulative travel time
+      // The TimeInfo object handles the base time (current time or user's datetime)
+      seconds_offset = pred.cost().secs;
+    } else {
+      // Reverse search: Estimate total route time and work backwards
+      // This is similar to arrive_by logic - estimate total time and subtract elapsed time
+
+      // Use the pre-calculated total estimated time for reverse search
+      // This was calculated once in GetBestPath and stored in total_estimated_time_
+      float reverse_total_estimated_time = total_estimated_time_;
+
+      // For reverse search: work backwards from total estimated time
+      // Subtract the cumulative travel time so far from the total estimated time
+      seconds_offset = reverse_total_estimated_time - pred.cost().secs;
+
+      // Ensure non-negative time
+      seconds_offset = std::max(0.0f, seconds_offset);
+    }
+  }
+
+  // Create time-aware TimeInfo
   auto offset_time = FORWARD
                          ? time_info.forward(seconds_offset, static_cast<int>(nodeinfo->timezone()))
                          : time_info.reverse(seconds_offset, static_cast<int>(nodeinfo->timezone()));
@@ -515,11 +558,33 @@ BidirectionalAStar::GetBestPath(valhalla::Location& origin,
                      origin.correlation().edges(0).ll().lat());
   PointLL destination_new(destination.correlation().edges(0).ll().lng(),
                           destination.correlation().edges(0).ll().lat());
+
+
+
   Init(origin_new, destination_new);
+
+  // Calculate total estimated time for the entire route (once per route request)
+  // This is needed for both forward and reverse searches in time-aware routing
+  // Get origin and destination coordinates
+  PointLL origin_ll = origin_new;
+  PointLL dest_ll = destination_new;
+
+  // Calculate total haversine distance
+  float total_distance = origin_ll.Distance(dest_ll);
+
+  // Estimate total route time: 100 km = 1 hour (3600 seconds)
+  const float AVERAGE_SPEED_KMH = 100.0f;
+  const float AVERAGE_SPEED_MS = AVERAGE_SPEED_KMH * 1000.0f / 3600.0f; // m/s
+
+  total_estimated_time_ = total_distance / AVERAGE_SPEED_MS;
+  total_estimated_time_ = std::max(0.0f, total_estimated_time_);
+
+  // Store date time type for handling all time scenarios
+  date_time_type_ = options.date_time_type();
 
   // we use a non varying time for all time dependent routes until we can figure out how to vary the
   // time during the path computation in the bidirectional algorithm
-  bool invariant = options.date_time_type() != Options::no_time;
+  bool invariant = date_time_type_ != Options::no_time;
   // Get time information for forward and backward searches
   auto forward_time_info = TimeInfo::make(origin, graphreader, &tz_cache_);
   auto reverse_time_info = TimeInfo::make(destination, graphreader, &tz_cache_);
